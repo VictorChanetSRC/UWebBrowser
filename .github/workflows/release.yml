@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "brand/**"
+      - "LICENSE"
   workflow_dispatch:
 
 concurrency:
@@ -10,33 +15,75 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Releases are keyed to the version in src-tauri/tauri.conf.json.
-  # A push to main only releases when that version has no tag yet, so
-  # regular pushes are free and bumping the version is what ships.
+  # Every push to main ships a release. The version is resolved in order:
+  #   1. src-tauri/tauri.conf.json version, if it has no tag yet (manual bump)
+  #   2. "release: X.Y.Z" in the head commit message (explicit minor/major)
+  #   3. otherwise the patch version is bumped automatically
+  # For 2 and 3 the bump is committed back to main so the repo always
+  # matches what users are running. That commit can't retrigger this
+  # workflow (pushes made with GITHUB_TOKEN never do).
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
-      version: ${{ steps.check.outputs.version }}
-      exists: ${{ steps.check.outputs.exists }}
+      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
-      - name: Read version and check for existing tag
-        id: check
+      - name: Resolve release version
+        id: resolve
+        env:
+          HEAD_MSG: ${{ github.event.head_commit.message }}
         run: |
-          VERSION=$(jq -r .version src-tauri/tauri.conf.json)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null 2>&1; then
-            echo "Tag v$VERSION already exists - skipping release."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Tag v$VERSION does not exist - releasing."
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          FILE_VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+
+          # Manual bump: the file version is untagged, release it as-is.
+          if ! git rev-parse -q --verify "refs/tags/v$FILE_VERSION" > /dev/null; then
+            echo "Releasing manually set version $FILE_VERSION"
+            echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          # Explicit version in the commit message: "release: X.Y.Z"
+          if [[ "$HEAD_MSG" =~ release:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            NEXT="${BASH_REMATCH[1]}"
+            if git rev-parse -q --verify "refs/tags/v$NEXT" > /dev/null; then
+              echo "::error::Commit message asks for $NEXT but tag v$NEXT already exists."
+              exit 1
+            fi
+            echo "Using version $NEXT from commit message"
+          else
+            # Auto patch bump to the next free version.
+            IFS=. read -r MA MI PA <<< "$FILE_VERSION"
+            NEXT="$MA.$MI.$((PA + 1))"
+            while git rev-parse -q --verify "refs/tags/v$NEXT" > /dev/null; do
+              PA=$((PA + 1))
+              NEXT="$MA.$MI.$PA"
+            done
+            echo "Auto-bumping patch version to $NEXT"
+          fi
+
+          jq --arg v "$NEXT" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          jq --arg v "$NEXT" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          sed -i "0,/^version = \".*\"$/s//version = \"$NEXT\"/" src-tauri/Cargo.toml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: release v$NEXT [skip ci]"
+          git push origin HEAD:main
+
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   release:
     needs: version
-    if: needs.version.outputs.exists == 'false'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -44,6 +91,8 @@ jobs:
       HAS_AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4

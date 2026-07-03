@@ -2,24 +2,32 @@
 
 ## How the pipeline works
 
-`.github/workflows/release.yml` runs on every push to `main`:
+`.github/workflows/release.yml` runs on every push to `main` (except
+doc-only changes: `*.md`, `docs/`, `brand/`, `LICENSE`) and **always ships a
+release**. The version is resolved in this order:
 
-1. It reads `version` from `src-tauri/tauri.conf.json`.
-2. If the tag `v<version>` **already exists**, it stops — nothing is built.
-3. If the tag is new, it builds the Windows NSIS installer, signs it with
-   Azure Trusted Signing, signs the updater artifact with the Tauri updater
-   key, and publishes a GitHub Release `v<version>` with `latest.json`
-   (used by the in-app auto-updater).
+1. **Manual bump** — if `version` in `src-tauri/tauri.conf.json` has no
+   `v<version>` tag yet, that exact version is released.
+2. **Commit message** — if the pushed commit message contains
+   `release: X.Y.Z` (e.g. `git commit -m "new tab engine, release: 0.2.0"`),
+   that version is used. Fails if the tag already exists.
+3. **Auto patch bump** — otherwise CI bumps the patch version to the next
+   free one (`0.1.0` → `0.1.1`).
 
-**To ship a release:** bump the version, then push to `main`.
+For 2 and 3, CI updates `tauri.conf.json`, `package.json` and
+`src-tauri/Cargo.toml`, commits `chore: release vX.Y.Z` back to `main`, and
+builds from that commit — so the repo always matches what users run.
+(`git pull` after a release to get the bump commit locally.) The bump
+commit cannot retrigger the workflow: pushes made with the built-in
+`GITHUB_TOKEN` never start new workflow runs.
 
-```jsonc
-// src-tauri/tauri.conf.json
-"version": "0.2.0"
-```
+The build itself: Windows NSIS installer, signed with Azure Trusted
+Signing, updater artifact signed with the Tauri updater key, published as
+GitHub Release `v<version>` together with `latest.json` (consumed by the
+in-app auto-updater).
 
-Keep `package.json` and `src-tauri/Cargo.toml` versions in sync (cosmetic,
-but avoids confusion). Pushes that don't change the version never release.
+Note: if you ever protect the `main` branch, allow the default
+`GITHUB_TOKEN` to push (or the auto-bump commit will be rejected).
 
 ## One-time setup
 
