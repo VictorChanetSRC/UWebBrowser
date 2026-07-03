@@ -1,6 +1,6 @@
 [package]
 name = "uwebbrowser"
-version = "0.1.1"
+version = "0.1.2"
 description = "The web browser for Unreal Engine developers."
 authors = ["USourceControl"]
 license = "MIT"
