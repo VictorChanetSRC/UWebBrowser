@@ -50,12 +50,14 @@ pub fn tab_id_of(label: &str) -> Option<&str> {
     label.strip_prefix(TAB_PREFIX)
 }
 
-/// Only real navigable web schemes plus our internal `uwb:` are allowed;
-/// anything else (file:, javascript:, data:, …) is rejected here rather than
-/// trusting the frontend to have normalized it.
+/// Only real navigable schemes plus our internal `uwb:` are allowed; anything
+/// else (javascript:, data:, …) is rejected here rather than trusting the
+/// frontend to have normalized it. file: is deliberately in — local documents
+/// opened via the OS file association or a typed path render like in any
+/// browser.
 fn check_scheme(url: &Url) -> Result<(), String> {
     match url.scheme() {
-        "http" | "https" | "uwb" => Ok(()),
+        "http" | "https" | "file" | "uwb" => Ok(()),
         other => Err(format!("unsupported url scheme: {other}")),
     }
 }

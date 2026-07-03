@@ -1,3 +1,4 @@
+mod default_browser;
 pub mod discovery;
 mod history;
 mod http;
@@ -6,6 +7,7 @@ mod passwords;
 mod stats;
 mod sysmon;
 mod tabs;
+mod terminal;
 mod unreal;
 
 use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
@@ -16,16 +18,24 @@ pub fn run() {
     let mut builder = passwords::register(tauri::Builder::default());
     #[cfg(desktop)]
     {
+        // When we're the default browser, opening a link spawns a second
+        // process; this forwards its URL to the running instance instead.
         builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+                default_browser::on_second_instance(app, &argv, &cwd);
+            }))
             .plugin(tauri_plugin_updater::Builder::new().build())
-            .plugin(tauri_plugin_process::init());
+            .plugin(tauri_plugin_process::init())
+            .plugin(tauri_plugin_window_state::Builder::default().build());
     }
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(tabs::TabsState::default())
+        .manage(default_browser::StartupUrls::from_env())
         .manage(unreal::BuildState::default())
         .manage(sysmon::MonitorState::default())
+        .manage(terminal::TermState::default())
         .invoke_handler(tauri::generate_handler![
             tabs::create_tab,
             tabs::navigate_tab,
@@ -34,6 +44,13 @@ pub fn run() {
             tabs::tab_eval,
             tabs::set_content_insets,
             tabs::clear_browsing_data,
+            terminal::term_create,
+            terminal::term_write,
+            terminal::term_resize,
+            terminal::term_close,
+            default_browser::is_default_browser,
+            default_browser::open_default_browser_settings,
+            default_browser::take_startup_urls,
             stats::steam_stats,
             stats::reddit_search,
             stats::itch_games,
@@ -68,6 +85,9 @@ pub fn run() {
             passwords::pass_generate
         ])
         .setup(|app| {
+            // Chrome-style: refresh the default-browser registration on every
+            // launch so the registry always points at the current exe.
+            default_browser::register_as_browser();
             passwords::init(app.handle()).map_err(|e| format!("password manager: {e}"))?;
             let width = 1360.0;
             let height = 860.0;
@@ -82,6 +102,11 @@ pub fn run() {
                 .center()
                 .build()?;
 
+            // The window-state plugin may have restored a saved size during
+            // creation, so size the chrome webview from the window itself.
+            let inner: LogicalSize<f64> =
+                window.inner_size()?.to_logical(window.scale_factor()?);
+
             // The chrome webview hosts the browser UI (tabs, toolbar, sidebar,
             // dashboard). Tab webviews are stacked on top of its content area.
             window.add_child(
@@ -94,7 +119,7 @@ pub fn run() {
                 .disable_drag_drop_handler()
                 .auto_resize(),
                 LogicalPosition::new(0.0, 0.0),
-                LogicalSize::new(width, height),
+                inner,
             )?;
 
             // Keep tab webviews glued to the content area when the window resizes.

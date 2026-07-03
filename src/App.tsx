@@ -9,12 +9,15 @@ import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { PassPanel } from "./components/PassPanel";
 import { PassSaveBanner, type Capture } from "./components/PassSaveBanner";
+import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
+import { TerminalView } from "./components/TerminalView";
+import { pruneTerminals } from "./lib/terminal";
 import { initProvider, pass } from "./lib/passwords";
 import { ipc } from "./lib/ipc";
 import { loadConfig, saveConfig, type UwbConfig } from "./lib/config";
 import type { LinkItem } from "./lib/engines";
 import { recordVisit, updateTitle } from "./lib/history";
-import { hostOf } from "./lib/url";
+import { hostOf, tabLabelFor } from "./lib/url";
 import {
   engineFor,
   loadSettings,
@@ -44,8 +47,12 @@ export const DISCOVER_URL = "uwb://discover";
 export const UNREAL_URL = "uwb://unreal";
 export const SETTINGS_URL = "uwb://settings";
 export const WORKBAR_URL = "uwb://workbar";
+export const TERMINAL_URL = "uwb://terminal";
 const TOP_INSET = 92; // 44px title bar + 48px toolbar
 const SIDEBAR_WIDTH = 240;
+const DEFAULT_PROMPT_SNOOZE_KEY = "uwb.defaultBrowser.snoozeUntil";
+const DEFAULT_PROMPT_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
+const DEFAULT_PROMPT_DELAY_MS = 2500;
 
 const internalTitle = (url: string) =>
   url === DISCOVER_URL
@@ -56,7 +63,9 @@ const internalTitle = (url: string) =>
         ? "Settings"
         : url === WORKBAR_URL
           ? "Work bar"
-          : "New tab";
+          : url === TERMINAL_URL
+            ? "Terminal"
+            : "New tab";
 
 const homeTab = (url: string = HOME_URL): Tab => ({
   id: crypto.randomUUID(),
@@ -74,9 +83,15 @@ function normalizeInput(raw: string, searchUrl: (query: string) => string): stri
     if (input.includes("unreal")) return UNREAL_URL;
     if (input.includes("settings")) return SETTINGS_URL;
     if (input.includes("workbar") || input.includes("widget")) return WORKBAR_URL;
+    if (input.includes("term")) return TERMINAL_URL;
     return HOME_URL;
   }
-  if (/^https?:\/\//i.test(input)) return input;
+  if (/^(https?|file):\/\//i.test(input)) return input;
+  // A local path typed or pasted into the omnibox (C:\dev\page.html). encodeURI
+  // covers spaces etc.; # is legal in Windows file names but not in URLs.
+  if (/^[a-zA-Z]:[\\/]/.test(input)) {
+    return encodeURI(`file:///${input.replace(/\\/g, "/")}`).replace(/#/g, "%23");
+  }
   if (!input.includes(" ") && input.includes(".")) return `https://${input}`;
   return searchUrl(input);
 }
@@ -97,9 +112,19 @@ export default function App() {
   const [passOpen, setPassOpen] = useState(false);
   const [capture, setCapture] = useState<Capture | null>(null);
   const [toast, setToast] = useState("");
+  const [defaultPrompt, setDefaultPrompt] = useState(false);
   const closedUrls = useRef<string[]>([]);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
+
+  // Kill PTY sessions whose tab is gone (closed, or navigated away from
+  // uwb://terminal). Creation happens in TerminalView on first mount.
+  useEffect(() => {
+    const alive = new Set(
+      tabs.filter((t) => t.kind === "home" && t.url === TERMINAL_URL).map((t) => t.id),
+    );
+    pruneTerminals(alive);
+  }, [tabs]);
 
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -130,7 +155,7 @@ export default function App() {
           if (kind === "loading") return { ...tab, loading: value === "true" };
           const title =
             tab.title === "New tab" || tab.title === ""
-              ? new URL(value).hostname
+              ? tabLabelFor(value)
               : tab.title;
           return { ...tab, url: value, title };
         }),
@@ -195,7 +220,7 @@ export default function App() {
       if (url && !url.startsWith("uwb:")) {
         tab.kind = "web";
         tab.url = url;
-        tab.title = new URL(url).hostname;
+        tab.title = tabLabelFor(url);
         tab.loading = true;
         ipc.createTab(tab.id, url).catch(() => {});
       } else {
@@ -207,6 +232,62 @@ export default function App() {
     },
     [],
   );
+
+  // URLs handed over by the OS (we're the default browser): the launch argv,
+  // drained once, plus links clicked in other apps while we're running,
+  // forwarded by the single-instance callback.
+  useEffect(() => {
+    ipc
+      .takeStartupUrls()
+      .then((urls) => urls.forEach((url) => openNewTab(url)))
+      .catch(() => {});
+    const unlisten = ipc.onOpenUrl((url) => openNewTab(url));
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [openNewTab]);
+
+  // Offer to become the default browser shortly after launch, unless we
+  // already are or the user snoozed the prompt recently.
+  useEffect(() => {
+    if (Date.now() < Number(localStorage.getItem(DEFAULT_PROMPT_SNOOZE_KEY) ?? 0)) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      ipc
+        .isDefaultBrowser()
+        .then((isDefault) => setDefaultPrompt(!isDefault))
+        .catch(() => {});
+    }, DEFAULT_PROMPT_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // The default is set in Windows Settings, not in-app — re-check when focus
+  // comes back so the prompt closes itself once the choice sticks.
+  useEffect(() => {
+    if (!defaultPrompt) return;
+    const onFocus = () => {
+      ipc
+        .isDefaultBrowser()
+        .then((isDefault) => {
+          if (isDefault) {
+            setDefaultPrompt(false);
+            setToast("UWebBrowser is now your default browser");
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [defaultPrompt]);
+
+  const dismissDefaultPrompt = useCallback(() => {
+    localStorage.setItem(
+      DEFAULT_PROMPT_SNOOZE_KEY,
+      String(Date.now() + DEFAULT_PROMPT_SNOOZE_MS),
+    );
+    setDefaultPrompt(false);
+  }, []);
 
   // Open an internal page: repurpose the current tab if it's already
   // internal, otherwise open a new one next to the page being read.
@@ -241,7 +322,7 @@ export default function App() {
         setTabs((prev) =>
           prev.map((t) =>
             t.id === tab.id
-              ? { ...t, kind: "web", url, title: new URL(url).hostname, loading: true }
+              ? { ...t, kind: "web", url, title: tabLabelFor(url), loading: true }
               : t,
           ),
         );
@@ -307,6 +388,7 @@ export default function App() {
   const goDiscover = useCallback(() => goInternal(DISCOVER_URL), [goInternal]);
   const goUnreal = useCallback(() => goInternal(UNREAL_URL), [goInternal]);
   const goWorkbar = useCallback(() => goInternal(WORKBAR_URL), [goInternal]);
+  const goTerminal = useCallback(() => openNewTab(TERMINAL_URL), [openNewTab]);
   const goSettings = useCallback(() => goInternal(SETTINGS_URL), [goInternal]);
   const goHome = useCallback(() => goInternal(HOME_URL), [goInternal]);
   const openPasswords = useCallback(() => setPassOpen(true), []);
@@ -334,6 +416,15 @@ export default function App() {
     };
 
     const onKey = (e: KeyboardEvent) => {
+      // While a terminal has focus the shell owns the keyboard (Ctrl+R is
+      // history search, Ctrl+L clears, …); only tab cycling stays global.
+      if ((e.target as HTMLElement | null)?.closest?.("[data-terminal]")) {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Tab") {
+          e.preventDefault();
+          cycleTabs(e.shiftKey ? -1 : 1);
+        }
+        return;
+      }
       const tab = currentTab();
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
@@ -381,6 +472,11 @@ export default function App() {
         goInternal(SETTINGS_URL);
         return;
       }
+      if (e.key === "`") {
+        e.preventDefault();
+        openNewTab(TERMINAL_URL);
+        return;
+      }
       if (key === "t") {
         e.preventDefault();
         openNewTab();
@@ -426,6 +522,7 @@ export default function App() {
         onHome={goHome}
         onDiscover={goDiscover}
         onUnreal={goUnreal}
+        onTerminal={goTerminal}
         onSettings={goSettings}
         onPasswords={openPasswords}
         onTogglePin={onTogglePin}
@@ -469,6 +566,9 @@ export default function App() {
                 onResetPins={() => setWidgets(seedWidgets())}
                 onCustomizeWorkbar={goWorkbar}
               />
+            ) : activeTab.url === TERMINAL_URL ? (
+              /* Rendered by the keep-alive layer below. */
+              <div className="h-full" />
             ) : activeTab.url === WORKBAR_URL ? (
               <Workbar
                 widgets={widgets}
@@ -490,6 +590,22 @@ export default function App() {
           ) : (
             <div className="h-full" />
           )}
+
+          {/* Terminal tabs stay mounted while hidden so their shell keeps
+              running and scrollback survives tab switches. */}
+          {tabs
+            .filter((t) => t.kind === "home" && t.url === TERMINAL_URL)
+            .map((t) => (
+              <div
+                key={t.id}
+                className="absolute inset-0"
+                style={{ display: t.id === activeTab.id ? "block" : "none" }}
+              >
+                <TerminalView id={t.id} active={t.id === activeTab.id} />
+              </div>
+            ))}
+
+          {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
 
           {capture && (
             <PassSaveBanner

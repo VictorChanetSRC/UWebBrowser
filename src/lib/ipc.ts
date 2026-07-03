@@ -8,6 +8,12 @@ export type TabEventPayload = {
   value: string;
 };
 
+/** A chunk of PTY output for one terminal session. */
+export type TermOutputPayload = { id: string; data: string };
+
+/** The shell of a terminal session exited; `code` is null if unknowable. */
+export type TermExitPayload = { id: string; code: number | null };
+
 export const ipc = {
   createTab: (id: string, url: string) => invoke("create_tab", { id, url }),
   navigateTab: (id: string, url: string) => invoke("navigate_tab", { id, url }),
@@ -31,6 +37,23 @@ export const ipc = {
     invoke<PlatformHit>("check_platform", { platform, query }),
   onTabEvent: (handler: (payload: TabEventPayload) => void): Promise<UnlistenFn> =>
     listen<TabEventPayload>("tab-event", (event) => handler(event.payload)),
+  termCreate: (id: string, cols: number, rows: number) =>
+    invoke("term_create", { id, cols, rows }),
+  termWrite: (id: string, data: string) => invoke("term_write", { id, data }),
+  termResize: (id: string, cols: number, rows: number) =>
+    invoke("term_resize", { id, cols, rows }),
+  termClose: (id: string) => invoke("term_close", { id }),
+  onTermOutput: (handler: (payload: TermOutputPayload) => void): Promise<UnlistenFn> =>
+    listen<TermOutputPayload>("term-output", (event) => handler(event.payload)),
+  onTermExit: (handler: (payload: TermExitPayload) => void): Promise<UnlistenFn> =>
+    listen<TermExitPayload>("term-exit", (event) => handler(event.payload)),
+  isDefaultBrowser: () => invoke<boolean>("is_default_browser"),
+  openDefaultBrowserSettings: () => invoke("open_default_browser_settings"),
+  /** URLs the OS launched us with (we're someone's default browser). */
+  takeStartupUrls: () => invoke<string[]>("take_startup_urls"),
+  /** A URL forwarded from a second app launch while we're already running. */
+  onOpenUrl: (handler: (url: string) => void): Promise<UnlistenFn> =>
+    listen<string>("open-url", (event) => handler(event.payload)),
   detectEngines: () => invoke<EngineInstall[]>("detect_engines"),
   validateEngine: (path: string) => invoke<EngineInstall>("validate_engine", { path }),
   readUproject: (path: string) => invoke<UProjectInfo>("read_uproject", { path }),

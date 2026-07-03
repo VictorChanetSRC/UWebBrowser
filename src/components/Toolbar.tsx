@@ -16,6 +16,7 @@ import {
   Search,
   Settings as SettingsIcon,
   Star,
+  Terminal as TerminalIcon,
   X,
 } from "lucide-react";
 import type { Tab } from "../App";
@@ -42,6 +43,7 @@ type Props = {
   onHome: () => void;
   onDiscover: () => void;
   onUnreal: () => void;
+  onTerminal: () => void;
   onSettings: () => void;
   onPasswords: () => void;
   onTogglePin: () => void;
@@ -179,6 +181,9 @@ function ToolbarImpl(props: Props) {
         </IconButton>
         <IconButton label="Unreal toolbench" onClick={props.onUnreal}>
           <Hammer aria-hidden />
+        </IconButton>
+        <IconButton label="Terminal · Ctrl+`" onClick={props.onTerminal}>
+          <TerminalIcon aria-hidden />
         </IconButton>
       </div>
 

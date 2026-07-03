@@ -11,6 +11,25 @@ export function hostOf(raw: string): string {
   }
 }
 
+/** Human label for a tab URL: the hostname, or the file name for file: URLs
+ *  (which have no host). Falls back to the raw string. Never throws. */
+export function tabLabelFor(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "file:") {
+      const name = url.pathname.split("/").pop() ?? "";
+      try {
+        return decodeURIComponent(name) || "Local file";
+      } catch {
+        return name || "Local file";
+      }
+    }
+    return url.hostname;
+  } catch {
+    return raw;
+  }
+}
+
 /** Google's favicon service for a site, or `""` if the URL has no host.
  *  Callers render a neutral glyph on `onError` — the service can be blocked
  *  offline, and it reveals the host to Google. */
