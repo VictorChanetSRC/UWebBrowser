@@ -40,6 +40,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +65,7 @@ jobs:
       # trusted-signing-cli signs via Azure Trusted Signing. Cached so the
       # cargo install only pays its compile cost once.
       - name: Install trusted-signing-cli
-        if: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
+        if: env.HAS_AZURE_SIGNING == 'true'
         uses: taiki-e/cache-cargo-install-action@v2
         with:
           tool: trusted-signing-cli
