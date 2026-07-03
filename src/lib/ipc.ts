@@ -4,7 +4,9 @@ import type { PlatformHit } from "./platforms";
 
 export type TabEventPayload = {
   id: string;
-  kind: "title" | "url" | "loading";
+  /** "new-tab" carries a URL the page asked to open in a new tab
+   *  (window.open / target="_blank"); `id` is the opener tab. */
+  kind: "title" | "url" | "loading" | "new-tab";
   value: string;
 };
 

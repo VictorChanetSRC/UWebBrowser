@@ -2,8 +2,8 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{
-    webview::PageLoadEvent, AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url,
-    WebviewUrl, Window,
+    webview::{NewWindowResponse, PageLoadEvent},
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, Window,
 };
 
 pub const CHROME_LABEL: &str = "chrome";
@@ -122,6 +122,8 @@ pub async fn create_tab(
     let id_nav = id.clone();
     let app_load = app.clone();
     let id_load = id.clone();
+    let app_new = app.clone();
+    let id_new = id.clone();
 
     let mut builder = tauri::webview::WebviewBuilder::new(tab_label(&id), WebviewUrl::External(parsed))
         // Hand drag-and-drop back to WebView2 so pages behave like they do in
@@ -137,6 +139,18 @@ pub async fn create_tab(
         .on_navigation(move |url| {
             emit_tab_event(&app_nav, &id_nav, "url", url.to_string());
             true
+        })
+        // window.open() / target="_blank" raise NewWindowRequested instead of
+        // navigating; without a handler the engine silently drops the request.
+        // Route the URL to the chrome UI, which opens it as a regular tab.
+        // Deny keeps the engine from spawning its own popup window; it also
+        // means window.open() returns null to the page, so opener-based popup
+        // flows (some OAuth logins) don't work — no worse than before.
+        .on_new_window(move |url, _features| {
+            if check_scheme(&url).is_ok() {
+                emit_tab_event(&app_new, &id_new, "new-tab", url.to_string());
+            }
+            NewWindowResponse::Deny
         })
         .on_page_load(move |_webview, payload| {
             let started = matches!(payload.event(), PageLoadEvent::Started);

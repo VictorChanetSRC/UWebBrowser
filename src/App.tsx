@@ -140,9 +140,34 @@ export default function App() {
     localStorage.setItem("uwb.sidebar", sidebarOpen ? "1" : "0");
   }, [sidebarOpen]);
 
+  const openNewTab = useCallback(
+    (url?: string) => {
+      const tab = homeTab(url?.startsWith("uwb:") ? url : undefined);
+      if (url && !url.startsWith("uwb:")) {
+        tab.kind = "web";
+        tab.url = url;
+        tab.title = tabLabelFor(url);
+        tab.loading = true;
+        ipc.createTab(tab.id, url).catch(() => {});
+      } else {
+        // Internal pages render in the chrome; just clear the content area.
+        ipc.activateTab(null).catch(() => {});
+      }
+      setTabs((prev) => [...prev, tab]);
+      setActiveId(tab.id);
+    },
+    [],
+  );
+
   // Title / URL / loading events flowing back from tab webviews.
   useEffect(() => {
     const unlisten = ipc.onTabEvent(({ id, kind, value }) => {
+      if (kind === "new-tab") {
+        // The page asked for a new window (window.open / target="_blank");
+        // open it as a regular foreground tab.
+        openNewTab(value);
+        return;
+      }
       const current = tabsRef.current.find((t) => t.id === id);
       if (current) {
         if (kind === "url") recordVisit(value, "");
@@ -164,7 +189,7 @@ export default function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [openNewTab]);
 
   const activate = useCallback((tab: Tab) => {
     setActiveId(tab.id);
@@ -213,25 +238,6 @@ export default function App() {
       return next;
     });
   }, []);
-
-  const openNewTab = useCallback(
-    (url?: string) => {
-      const tab = homeTab(url?.startsWith("uwb:") ? url : undefined);
-      if (url && !url.startsWith("uwb:")) {
-        tab.kind = "web";
-        tab.url = url;
-        tab.title = tabLabelFor(url);
-        tab.loading = true;
-        ipc.createTab(tab.id, url).catch(() => {});
-      } else {
-        // Internal pages render in the chrome; just clear the content area.
-        ipc.activateTab(null).catch(() => {});
-      }
-      setTabs((prev) => [...prev, tab]);
-      setActiveId(tab.id);
-    },
-    [],
-  );
 
   // URLs handed over by the OS (we're the default browser): the launch argv,
   // drained once, plus links clicked in other apps while we're running,
