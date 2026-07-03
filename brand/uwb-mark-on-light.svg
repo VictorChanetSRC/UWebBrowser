@@ -1,0 +1,10 @@
+<svg width="96" height="96" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- UWebBrowser mark: a globe with a live marker. Drawn on a 24-unit
+       grid; node radius, stroke weight and the globe curves derive from
+       that unit. Geometry transcribed from the brand guidelines PDF;
+       never redraw by hand. -->
+  <circle cx="12" cy="12" r="10" stroke="#141417" stroke-width="2.9"/>
+  <ellipse cx="12" cy="12" rx="4.05" ry="10" stroke="#141417" stroke-width="2.9"/>
+  <path d="M2 12h20" stroke="#141417" stroke-width="2.9" stroke-linecap="round"/>
+  <circle cx="19.7" cy="4.3" r="3.65" fill="#F24C3A"/>
+</svg>

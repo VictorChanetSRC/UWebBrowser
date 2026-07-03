@@ -1,0 +1,54 @@
+[package]
+name = "uwebbrowser"
+version = "0.1.0"
+description = "The web browser for Unreal Engine developers."
+authors = ["USourceControl"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "uwebbrowser_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["unstable"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+# Real Public Suffix List, compiled in — backs cross-site credential matching.
+psl = "2"
+# default-features off drops the schannel/native-tls stack; we only use rustls.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+urlencoding = "2"
+# RSS/Atom parsing for the dashboard news widgets.
+quick-xml = "0.37"
+# Feed date parsing only (RFC 2822 + RFC 3339); no clock, no timezone db.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+sysinfo = "0.33"
+nvml-wrapper = "0.10"
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+zeroize = { version = "1", features = ["derive"] }
+getrandom = "0.2"
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "net", "time"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

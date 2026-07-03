@@ -1,0 +1,12 @@
+<svg width="380" height="72" viewBox="0 0 380 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Primary lockup: mark + wordmark. The wordmark is set in Geist Sans
+       SemiBold, lowercase, tracked in slightly. Requires Geist installed;
+       falls back to the system sans otherwise. -->
+  <g transform="translate(12 12) scale(2)">
+    <circle cx="12" cy="12" r="10" stroke="#141417" stroke-width="2.9"/>
+    <ellipse cx="12" cy="12" rx="4.05" ry="10" stroke="#141417" stroke-width="2.9"/>
+    <path d="M2 12h20" stroke="#141417" stroke-width="2.9" stroke-linecap="round"/>
+    <circle cx="19.7" cy="4.3" r="3.65" fill="#F24C3A"/>
+  </g>
+  <text x="72" y="47" font-family="Geist Sans, Segoe UI, system-ui, sans-serif" font-size="30" font-weight="600" letter-spacing="-0.6" fill="#141417">uwebbrowser</text>
+</svg>

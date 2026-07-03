@@ -1,0 +1,202 @@
+/* ---------------------------------------------------------------------------
+   UWebBrowser design tokens (Brand Guidelines v1.0)
+   Ink does the work. Signal appears once per screen, if at all.
+--------------------------------------------------------------------------- */
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #0a0a0b;
+  --color-ink-900: #141417;
+  --color-ink-800: #1f1f23;
+  --color-ink-700: #2c2c32;
+  --color-ink-600: #45454d;
+  --color-ink-500: #6e6e77;
+  --color-ink-400: #9897a1;
+  --color-ink-300: #c5c4cc;
+  --color-ink-200: #e4e3e8;
+  --color-ink-100: #f2f1f4;
+  --color-signal-700: #b22a1c;
+  --color-signal-600: #d63a28;
+  --color-signal-500: #f24c3a;
+  --color-signal-400: #f66f5f;
+  --color-signal-300: #fa9888;
+  --color-signal-200: #fdc6bc;
+  --color-signal-100: #fde7e2;
+  --color-paper: #ffffff;
+  --color-bone: #fafaf9;
+
+  --font-sans: "Geist Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Cascadia Mono", monospace;
+
+  --ease-brand: cubic-bezier(0.2, 0, 0, 1);
+
+  --animate-tab-in: tab-in 0.16s var(--ease-brand);
+  --animate-rise: rise 0.4s var(--ease-brand) both;
+  --animate-loadslide: loadslide 1.1s var(--ease-brand) infinite;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  --animate-live-pulse: live-pulse 2.4s var(--ease-brand) infinite;
+
+  @keyframes tab-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  }
+  @keyframes loadslide {
+    from {
+      transform: translateX(-110%);
+    }
+    to {
+      transform: translateX(390%);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes live-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+/* shadcn/ui semantic tokens, mapped onto the Ink ramp. */
+:root {
+  --background: var(--color-ink-950);
+  --foreground: var(--color-ink-100);
+  --card: var(--color-ink-900);
+  --card-foreground: var(--color-ink-100);
+  --popover: var(--color-ink-900);
+  --popover-foreground: var(--color-ink-100);
+  --primary: var(--color-signal-600);
+  --primary-foreground: var(--color-paper);
+  --secondary: var(--color-ink-800);
+  --secondary-foreground: var(--color-ink-100);
+  --muted: var(--color-ink-800);
+  --muted-foreground: var(--color-ink-400);
+  --accent: var(--color-ink-800);
+  --accent-foreground: var(--color-ink-100);
+  --destructive: var(--color-signal-600);
+  --border: var(--color-ink-800);
+  --input: var(--color-ink-700);
+  --ring: var(--color-ink-500);
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply select-none bg-background font-sans text-sm text-foreground antialiased;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink-400);
+    /* Offset lets the outline follow the element's own radius — including
+       rounded-full pills — instead of forcing a fixed corner on it. */
+    outline-offset: 2px;
+  }
+
+  /* The one non-Ink selection color that could otherwise leak into the chrome
+     (the default OS blue) — pin it to the ramp. */
+  ::selection {
+    background: var(--color-ink-600);
+    color: var(--color-ink-100);
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-ink-700);
+    border-radius: 5px;
+    border: 2px solid var(--color-ink-950);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-600);
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* Hairline between neighboring inactive tabs. */
+  .tab[data-active="false"] + .tab[data-active="false"]::before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: var(--color-ink-800);
+  }
+}
+
+/* Respect the OS "reduce motion" setting: kill the entrance, shimmer, load-bar
+   and pulse animations, and neutralize transitions. Content still updates —
+   only the movement stops. The tab-strip FLIP is gated in JS separately. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
