@@ -105,6 +105,7 @@ impl LocalVault {
             title: item.title.clone(),
             username: item.username.clone(),
             host: origin::host_of(&item.url).unwrap_or_default(),
+            url: item.url.clone(),
         }
     }
 }
@@ -117,6 +118,8 @@ impl CredentialProvider for LocalVault {
             blurb: "Encrypted with your master password and kept on this machine. No account, no sync.".to_string(),
             can_save: true,
             can_generate: true,
+            can_edit: true,
+            can_delete: true,
             syncs: false,
             needs_master_password: true,
             unlock_secret: "password".to_string(),
@@ -224,6 +227,7 @@ impl CredentialProvider for LocalVault {
             stored.password = item.password.clone();
             stored.title = item.title.clone();
             stored.url = item.url.clone();
+            stored.updated = unix_now();
             LocalVault::summarize(stored)
         } else {
             let stored = StoredItem {
@@ -233,7 +237,7 @@ impl CredentialProvider for LocalVault {
                 password: item.password.clone(),
                 url: item.url.clone(),
                 totp: None,
-                updated: 0,
+                updated: unix_now(),
             };
             let summary = LocalVault::summarize(&stored);
             vault.items.push(stored);
@@ -242,6 +246,41 @@ impl CredentialProvider for LocalVault {
         self.write()?;
         Ok(summary)
     }
+
+    fn update(&mut self, id: &str, item: NewCredential) -> Result<CredentialSummary, String> {
+        let vault = self.vault.as_mut().ok_or_else(|| "vault is locked".to_string())?;
+        let stored = vault
+            .items
+            .iter_mut()
+            .find(|stored| stored.id == id)
+            .ok_or_else(|| "no such item".to_string())?;
+        stored.title = item.title.clone();
+        stored.username = item.username.clone();
+        stored.password = item.password.clone();
+        stored.url = item.url.clone();
+        stored.updated = unix_now();
+        let summary = LocalVault::summarize(stored);
+        self.write()?;
+        Ok(summary)
+    }
+
+    fn delete(&mut self, id: &str) -> Result<(), String> {
+        let vault = self.vault.as_mut().ok_or_else(|| "vault is locked".to_string())?;
+        let before = vault.items.len();
+        // Dropping the removed item zeroizes its password.
+        vault.items.retain(|stored| stored.id != id);
+        if vault.items.len() == before {
+            return Err("no such item".to_string());
+        }
+        self.write()
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn base64_salt(env: &Envelope) -> Result<Vec<u8>, String> {

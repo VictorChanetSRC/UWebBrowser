@@ -19,6 +19,10 @@ pub struct Capabilities {
     pub blurb: String,
     pub can_save: bool,
     pub can_generate: bool,
+    /// Whether items can be edited in place from the panel. Proton items are
+    /// managed through the Proton apps, so the CLI backend says no.
+    pub can_edit: bool,
+    pub can_delete: bool,
     pub syncs: bool,
     /// Local vault unlocks with a master password; Proton unlocks with a CLI
     /// session (or a pasted access token).
@@ -68,6 +72,8 @@ pub struct CredentialSummary {
     pub title: String,
     pub username: String,
     pub host: String,
+    /// The stored URL, so the edit form can round-trip it unchanged.
+    pub url: String,
 }
 
 /// The secret half, produced only at fill time for a single item.
@@ -116,4 +122,14 @@ pub trait CredentialProvider: Send {
     fn secret(&self, id: &str) -> Result<CredentialSecret, String>;
 
     fn save(&mut self, item: NewCredential) -> Result<CredentialSummary, String>;
+
+    /// Rewrite an existing item. Only offered where `can_edit` is true.
+    fn update(&mut self, _id: &str, _item: NewCredential) -> Result<CredentialSummary, String> {
+        Err("this backend doesn't support editing from here".to_string())
+    }
+
+    /// Remove an item. Only offered where `can_delete` is true.
+    fn delete(&mut self, _id: &str) -> Result<(), String> {
+        Err("this backend doesn't support deleting from here".to_string())
+    }
 }

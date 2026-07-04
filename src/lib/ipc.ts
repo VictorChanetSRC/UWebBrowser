@@ -38,6 +38,8 @@ export const ipc = {
   epicFreeGames: () => invoke<EpicFreeGame[]>("epic_free_games"),
   checkPlatform: (platform: string, query: string) =>
     invoke<PlatformHit>("check_platform", { platform, query }),
+  githubRepoStats: () => invoke<GithubRepoStats>("github_repo_stats"),
+  githubReleases: () => invoke<GithubRelease[]>("github_releases"),
   onTabEvent: (handler: (payload: TabEventPayload) => void): Promise<UnlistenFn> =>
     listen<TabEventPayload>("tab-event", (event) => handler(event.payload)),
   termCreate: (id: string, cols: number, rows: number) =>
@@ -134,6 +136,23 @@ export type EpicFreeGame = {
   startDate: string | null;
   endDate: string | null;
   originalPrice: number | null;
+};
+
+/** Public counters for the UWebBrowser repo; cached 15 min on the backend. */
+export type GithubRepoStats = {
+  stars: number;
+  forks: number;
+  /** GitHub counts open pull requests in this number too. */
+  openIssues: number;
+};
+
+/** One GitHub release; `published` is unix seconds, `notes` is markdown. */
+export type GithubRelease = {
+  name: string;
+  tag: string;
+  url: string;
+  published: number | null;
+  notes: string;
 };
 
 export type ItchGame = {

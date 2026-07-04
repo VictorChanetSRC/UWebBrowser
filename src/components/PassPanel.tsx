@@ -9,23 +9,30 @@ import {
   KeyRound,
   Lock,
   LockOpen,
+  Pencil,
   Plus,
   Search,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  User,
   X,
 } from "lucide-react";
 import {
+  loadNeverHosts,
   pass,
+  removeNeverHost,
   setProvider,
   refreshProvider,
   strength,
   type CredentialSummary,
   type GenerateOptions,
+  type NewCredential,
   type ProviderReport,
 } from "../lib/passwords";
 import { useProvider } from "@/hooks/use-provider";
+import { copyText } from "@/lib/url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +55,7 @@ type Props = {
   onOpenUrl?: (url: string) => void;
 };
 
-type View = "main" | "add" | "settings";
+type View = "main" | "add" | "edit" | "settings";
 
 function hostOf(url: string): string {
   try {
@@ -67,17 +74,27 @@ export function PassPanel(props: Props) {
   const [matches, setMatches] = useState<CredentialSummary[]>([]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<CredentialSummary | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Stable ref so callbacks that live in effect deps don't churn each render.
+  const toastRef = useRef(props.onToast);
+  toastRef.current = props.onToast;
 
   const state = report?.status.state;
 
   const loadVault = useCallback(async () => {
-    const [all, forSite] = await Promise.all([
-      pass.list().catch(() => [] as CredentialSummary[]),
-      activeUrl ? pass.matches(activeUrl).catch(() => [] as CredentialSummary[]) : Promise.resolve([]),
-    ]);
-    setItems(all);
-    setMatches(forSite);
+    try {
+      const [all, forSite] = await Promise.all([
+        pass.list(),
+        activeUrl ? pass.matches(activeUrl) : Promise.resolve([] as CredentialSummary[]),
+      ]);
+      setItems(all);
+      setMatches(forSite);
+    } catch (e) {
+      setItems([]);
+      setMatches([]);
+      toastRef.current?.(String(e));
+    }
   }, [activeUrl]);
 
   const refresh = useCallback(async () => {
@@ -173,6 +190,48 @@ export function PassPanel(props: Props) {
     [activeTabId, onClose, props],
   );
 
+  const copyValue = useCallback(async (text: string, what: string) => {
+    const ok = await copyText(text);
+    toastRef.current?.(ok ? `${what} copied` : "Couldn't write to the clipboard");
+  }, []);
+
+  const doCopyUsername = useCallback(
+    (item: CredentialSummary) => copyValue(item.username, "Username"),
+    [copyValue],
+  );
+
+  // The password is fetched only for this one action and handed straight to
+  // the clipboard — never kept in component state.
+  const doCopyPassword = useCallback(
+    async (item: CredentialSummary) => {
+      try {
+        const secret = await pass.reveal(item.id);
+        await copyValue(secret.password, "Password");
+      } catch (e) {
+        toastRef.current?.(String(e));
+      }
+    },
+    [copyValue],
+  );
+
+  const doEdit = useCallback((item: CredentialSummary) => {
+    setEditing(item);
+    setView("edit");
+  }, []);
+
+  const doDelete = useCallback(
+    async (item: CredentialSummary) => {
+      try {
+        await pass.delete(item.id);
+        toastRef.current?.(`Deleted ${item.title || item.host || "login"}`);
+        await loadVault();
+      } catch (e) {
+        toastRef.current?.(String(e));
+      }
+    },
+    [loadVault],
+  );
+
   const changeProvider = useCallback(
     async (id: string) => {
       setBusy(true);
@@ -258,6 +317,18 @@ export function PassPanel(props: Props) {
                 props.onToast?.("Saved to your vault");
               }}
             />
+          ) : view === "edit" && editing ? (
+            <EditView
+              report={report}
+              item={editing}
+              onCancel={() => setView("main")}
+              onSaved={async () => {
+                setView("main");
+                setEditing(null);
+                await loadVault();
+                props.onToast?.("Login updated");
+              }}
+            />
           ) : (
             <VaultView
               query={query}
@@ -266,8 +337,14 @@ export function PassPanel(props: Props) {
               others={others}
               canFill={Boolean(activeTabId)}
               canAdd={report.capabilities.canSave}
+              canEdit={report.capabilities.canEdit}
+              canDelete={report.capabilities.canDelete}
               onFill={doFill}
               onAdd={() => setView("add")}
+              onCopyUsername={doCopyUsername}
+              onCopyPassword={doCopyPassword}
+              onEdit={doEdit}
+              onDelete={doDelete}
             />
           )}
         </div>
@@ -301,7 +378,13 @@ function Header(props: {
       )}
       <div className="min-w-0 flex-1">
         <div className="text-[13.5px] font-medium text-ink-100">
-          {props.view === "add" ? "Add login" : props.view === "settings" ? "Backend" : "Passwords"}
+          {props.view === "add"
+            ? "Add login"
+            : props.view === "edit"
+              ? "Edit login"
+              : props.view === "settings"
+                ? "Backend"
+                : "Passwords"}
         </div>
         {props.report && props.view === "main" && (
           <div className="flex items-center gap-1.5 font-mono text-[11px] text-ink-500">
@@ -331,14 +414,23 @@ function Header(props: {
 
 // --- vault (unlocked) -------------------------------------------------------
 
-function VaultView(props: {
+type RowActions = {
+  canFill: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  onFill: (item: CredentialSummary) => void;
+  onCopyUsername: (item: CredentialSummary) => void;
+  onCopyPassword: (item: CredentialSummary) => void;
+  onEdit: (item: CredentialSummary) => void;
+  onDelete: (item: CredentialSummary) => void;
+};
+
+function VaultView(props: RowActions & {
   query: string;
   onQuery: (q: string) => void;
   matches: CredentialSummary[];
   others: CredentialSummary[];
-  canFill: boolean;
   canAdd: boolean;
-  onFill: (item: CredentialSummary) => void;
   onAdd: () => void;
 }) {
   const empty = props.matches.length === 0 && props.others.length === 0;
@@ -370,14 +462,14 @@ function VaultView(props: {
           {props.matches.length > 0 && (
             <Section label="For this site">
               {props.matches.map((item) => (
-                <ItemRow key={item.id} item={item} canFill={props.canFill} onFill={props.onFill} highlighted />
+                <ItemRow key={item.id} item={item} actions={props} highlighted />
               ))}
             </Section>
           )}
           {props.others.length > 0 && (
             <Section label={props.matches.length > 0 ? "All logins" : undefined}>
               {props.others.map((item) => (
-                <ItemRow key={item.id} item={item} canFill={props.canFill} onFill={props.onFill} />
+                <ItemRow key={item.id} item={item} actions={props} />
               ))}
             </Section>
           )}
@@ -396,47 +488,77 @@ function Section(props: { label?: string; children: React.ReactNode }) {
   );
 }
 
-function ItemRow(props: {
-  item: CredentialSummary;
-  canFill: boolean;
-  highlighted?: boolean;
-  onFill: (item: CredentialSummary) => void;
-}) {
-  const { item } = props;
+function ItemRow(props: { item: CredentialSummary; actions: RowActions; highlighted?: boolean }) {
+  const { item, actions } = props;
+  // Deleting is two clicks on the same spot: the trash arms, "Delete?" commits.
+  // Moving the pointer off the row disarms.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   return (
-    <button
-      type="button"
-      disabled={!props.canFill}
-      onClick={() => props.onFill(item)}
-      title={props.canFill ? "Fill this login" : "Open a website to fill"}
+    <div
+      onMouseLeave={() => setConfirmDelete(false)}
       className={cn(
-        "group flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors duration-[130ms] ease-brand",
+        "group flex items-center rounded-lg pr-1 transition-colors duration-[130ms] ease-brand focus-within:bg-ink-800 hover:bg-ink-800",
         props.highlighted && "bg-ink-800/40",
-        props.canFill ? "hover:bg-ink-800" : "cursor-default opacity-70",
       )}
     >
-      <span className="flex size-8 flex-none items-center justify-center overflow-hidden rounded-md border border-ink-800 bg-ink-950">
-        <Favicon
-          url={item.host ? `https://${item.host}` : ""}
-          size={64}
-          className="size-4 rounded-[3px]"
-          fallback={<Globe className="size-4 text-ink-600" aria-hidden />}
-        />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] text-ink-100">
-          {item.title || item.host || "Untitled"}
+      <button
+        type="button"
+        disabled={!actions.canFill}
+        onClick={() => actions.onFill(item)}
+        title={actions.canFill ? "Fill this login" : "Open a website to fill"}
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left",
+          !actions.canFill && "cursor-default opacity-70",
+        )}
+      >
+        <span className="flex size-8 flex-none items-center justify-center overflow-hidden rounded-md border border-ink-800 bg-ink-950">
+          <Favicon
+            url={item.host ? `https://${item.host}` : ""}
+            size={64}
+            className="size-4 rounded-[3px]"
+            fallback={<Globe className="size-4 text-ink-600" aria-hidden />}
+          />
         </span>
-        <span className="block truncate font-mono text-[11.5px] text-ink-500">
-          {item.username || "·"}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] text-ink-100">
+            {item.title || item.host || "Untitled"}
+          </span>
+          <span className="block truncate font-mono text-[11.5px] text-ink-500">
+            {item.username || "·"}
+          </span>
         </span>
-      </span>
-      {props.canFill && (
-        <span className="flex-none rounded-md border border-ink-700 px-2 py-1 text-[11px] text-ink-300 opacity-0 transition-opacity group-hover:opacity-100">
-          Fill
-        </span>
-      )}
-    </button>
+      </button>
+      <div className="flex flex-none items-center gap-0.5 opacity-0 transition-opacity duration-[130ms] focus-within:opacity-100 group-hover:opacity-100">
+        {item.username && (
+          <IconButton label="Copy username" onClick={() => actions.onCopyUsername(item)}>
+            <User aria-hidden />
+          </IconButton>
+        )}
+        <IconButton label="Copy password" onClick={() => actions.onCopyPassword(item)}>
+          <KeyRound aria-hidden />
+        </IconButton>
+        {actions.canEdit && (
+          <IconButton label="Edit login" onClick={() => actions.onEdit(item)}>
+            <Pencil aria-hidden />
+          </IconButton>
+        )}
+        {actions.canDelete &&
+          (confirmDelete ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-[26px] border-signal-500/60 px-2 text-[11px] text-signal-400 hover:border-signal-500 hover:bg-signal-500/10 hover:text-signal-300"
+              onClick={() => actions.onDelete(item)}
+            >
+              Delete?
+            </Button>
+          ) : (
+            <IconButton label="Delete login" onClick={() => setConfirmDelete(true)}>
+              <Trash2 aria-hidden />
+            </IconButton>
+          ))}
+      </div>
+    </div>
   );
 }
 
@@ -456,7 +578,7 @@ function EmptyState(props: { query: string; canAdd: boolean; onAdd: () => void }
   );
 }
 
-// --- add --------------------------------------------------------------------
+// --- add / edit ---------------------------------------------------------------
 
 function AddView(props: {
   report: ProviderReport;
@@ -464,10 +586,100 @@ function AddView(props: {
   onCancel: () => void;
   onSaved: () => void;
 }) {
-  const [title, setTitle] = useState(() => hostOf(props.defaultUrl));
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [url, setUrl] = useState(props.defaultUrl);
+  return (
+    <LoginEditor
+      report={props.report}
+      initial={{
+        title: hostOf(props.defaultUrl),
+        username: "",
+        password: "",
+        url: props.defaultUrl,
+      }}
+      submitLabel="Save login"
+      onCancel={props.onCancel}
+      onSubmit={async (item) => {
+        await pass.save(item);
+        props.onSaved();
+      }}
+    />
+  );
+}
+
+function EditView(props: {
+  report: ProviderReport;
+  item: CredentialSummary;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  // The stored password is fetched once to prefill the form; the editor isn't
+  // shown until it lands, so a save can never silently blank it.
+  const [password, setPassword] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    pass
+      .reveal(props.item.id)
+      .then((secret) => {
+        if (!cancelled) setPassword(secret.password);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.item.id]);
+
+  if (error) {
+    return (
+      <Centered>
+        <p className="max-w-[280px] text-[12px] text-signal-400">{error}</p>
+        <Button className="mt-4" variant="ghost" onClick={props.onCancel}>
+          Back
+        </Button>
+      </Centered>
+    );
+  }
+  if (password === null) {
+    return (
+      <Centered>
+        <Spinner className="size-5" />
+      </Centered>
+    );
+  }
+  return (
+    <LoginEditor
+      report={props.report}
+      initial={{
+        title: props.item.title,
+        username: props.item.username,
+        password,
+        url: props.item.url || (props.item.host ? `https://${props.item.host}` : ""),
+      }}
+      submitLabel="Save changes"
+      onCancel={props.onCancel}
+      onSubmit={async (item) => {
+        await pass.update(props.item.id, item);
+        props.onSaved();
+      }}
+    />
+  );
+}
+
+/** The login form shared by add and edit. Owns the field state; the caller
+ *  owns what submitting means. `onSubmit` may throw — its message is shown. */
+function LoginEditor(props: {
+  report: ProviderReport;
+  initial: NewCredential;
+  submitLabel: string;
+  onCancel: () => void;
+  onSubmit: (item: NewCredential) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(props.initial.title);
+  const [username, setUsername] = useState(props.initial.username);
+  const [password, setPassword] = useState(props.initial.password);
+  const [url, setUrl] = useState(props.initial.url);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -479,8 +691,7 @@ function AddView(props: {
     setBusy(true);
     setError("");
     try {
-      await pass.save({ title: title || hostOf(url), username, password, url });
-      props.onSaved();
+      await props.onSubmit({ title: title || hostOf(url), username, password, url });
     } catch (e) {
       setError(String(e));
       setBusy(false);
@@ -514,7 +725,7 @@ function AddView(props: {
         </Button>
         <Button variant="primary" onClick={submit} disabled={busy}>
           {busy ? <Spinner className="size-4" /> : <Check className="size-4" aria-hidden />}
-          Save login
+          {props.submitLabel}
         </Button>
       </div>
     </div>
@@ -932,6 +1143,39 @@ function SettingsView(props: {
       <p className="mt-1 px-1 text-[11.5px] leading-relaxed text-ink-500">
         Switching backends changes where new logins are saved. Each keeps its own items.
       </p>
+      <NeverList />
+    </div>
+  );
+}
+
+/** Sites the save prompt was told to stop asking about, with a way back. */
+function NeverList() {
+  const [hosts, setHosts] = useState<string[]>(() => loadNeverHosts());
+  if (hosts.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <Label className="px-1 text-[10.5px]">Never offer to save for</Label>
+      <div className="flex flex-col gap-0.5">
+        {hosts.map((host) => (
+          <div
+            key={host}
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-ink-800/50"
+          >
+            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-300">
+              {host}
+            </span>
+            <IconButton
+              label={`Offer to save for ${host} again`}
+              onClick={() => {
+                removeNeverHost(host);
+                setHosts(loadNeverHosts());
+              }}
+            >
+              <X aria-hidden />
+            </IconButton>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

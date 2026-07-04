@@ -31,7 +31,8 @@ use local::LocalVault;
 use origin::Origin;
 use proton::ProtonProvider;
 use provider::{
-    Capabilities, CredentialProvider, CredentialSummary, NewCredential, StatusReport,
+    Capabilities, CredentialProvider, CredentialSecret, CredentialSummary, NewCredential,
+    StatusReport,
 };
 
 pub use inject::content_script;
@@ -230,6 +231,40 @@ pub async fn pass_save(
     let summary = manager(&state).active_mut().save(item)?;
     reprime_all(&app);
     Ok(summary)
+}
+
+/// The full secret for one item — powers the chrome panel's copy and edit
+/// affordances. Only the chrome UI holds the IPC capability to call this;
+/// pages can't reach it.
+#[tauri::command]
+pub async fn pass_reveal(
+    state: State<'_, Mutex<PasswordManager>>,
+    id: String,
+) -> Result<CredentialSecret, String> {
+    manager(&state).active_ref().secret(&id)
+}
+
+#[tauri::command]
+pub async fn pass_update(
+    app: AppHandle,
+    state: State<'_, Mutex<PasswordManager>>,
+    id: String,
+    item: NewCredential,
+) -> Result<CredentialSummary, String> {
+    let summary = manager(&state).active_mut().update(&id, item)?;
+    reprime_all(&app);
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn pass_delete(
+    app: AppHandle,
+    state: State<'_, Mutex<PasswordManager>>,
+    id: String,
+) -> Result<(), String> {
+    manager(&state).active_mut().delete(&id)?;
+    reprime_all(&app);
+    Ok(())
 }
 
 /// Fill a chosen item into a tab. The security gate lives here: the item must
@@ -476,6 +511,9 @@ struct BridgeEvent {
     tab_id: String,
     host: String,
     username: String,
+    /// For `capture`: "new" (no saved login for this user) or "update" (the
+    /// saved password differs). Empty for other kinds.
+    mode: String,
 }
 
 /// The only thing a web page can reach on the native side. Every request's
@@ -526,7 +564,7 @@ fn handle_bridge(
         // User clicked the inline badge — ask chrome to open the vault panel.
         "fill" => {
             let host = origin.as_ref().map(|o| o.host.clone()).unwrap_or_default();
-            emit(app, "fill", &tab_id, &host, "");
+            emit(app, "fill", &tab_id, &host, "", "");
             serde_json::json!({ "ok": true })
         }
         // User picked an account in the inline dropdown — fill it natively. The
@@ -540,22 +578,25 @@ fn handle_bridge(
                 .unwrap_or(false);
             serde_json::json!({ "ok": ok })
         }
-        // A submitted login — stash it natively and prompt to save.
+        // A submitted login — stash it natively and prompt to save. Skips the
+        // prompt entirely when the exact login is already stored.
         "capture" => {
             if let Some(o) = origin.filter(|o| o.is_fillable()) {
                 let username = body.get("username").and_then(|v| v.as_str()).unwrap_or("");
                 let password = body.get("password").and_then(|v| v.as_str()).unwrap_or("");
                 if !password.is_empty() {
-                    let item = NewCredential {
-                        title: o.host.clone(),
-                        username: username.to_string(),
-                        password: password.to_string(),
-                        url: format!("{}://{}", o.scheme, o.host),
-                    };
-                    if let Ok(mut mgr) = app.state::<Mutex<PasswordManager>>().lock() {
-                        mgr.pending.insert(label.to_string(), item);
+                    if let Some(mode) = capture_mode(app, &o, username, password) {
+                        let item = NewCredential {
+                            title: o.host.clone(),
+                            username: username.to_string(),
+                            password: password.to_string(),
+                            url: format!("{}://{}", o.scheme, o.host),
+                        };
+                        if let Ok(mut mgr) = app.state::<Mutex<PasswordManager>>().lock() {
+                            mgr.pending.insert(label.to_string(), item);
+                        }
+                        emit(app, "capture", &tab_id, &o.host, username, mode);
                     }
-                    emit(app, "capture", &tab_id, &o.host, username);
                 }
             }
             serde_json::json!({ "ok": true })
@@ -564,7 +605,36 @@ fn handle_bridge(
     }
 }
 
-fn emit(app: &AppHandle, kind: &str, tab_id: &str, host: &str, username: &str) {
+/// How a captured login relates to what's stored: `Some("new")` when nothing
+/// matches this origin + username, `Some("update")` when a login exists but
+/// the password differs, `None` when the submitted password is already what's
+/// saved — nothing worth prompting about. Any provider error (locked vault,
+/// CLI hiccup) falls back to prompting as a new login.
+fn capture_mode(
+    app: &AppHandle,
+    origin: &Origin,
+    username: &str,
+    password: &str,
+) -> Option<&'static str> {
+    let state = app.state::<Mutex<PasswordManager>>();
+    let Ok(mgr) = state.lock() else {
+        return Some("new");
+    };
+    let provider = mgr.active_ref();
+    let existing = provider
+        .list_for_origin(origin)
+        .ok()
+        .and_then(|matches| matches.into_iter().find(|m| m.username == username));
+    match existing {
+        None => Some("new"),
+        Some(m) => match provider.secret(&m.id) {
+            Ok(secret) if secret.password == password => None,
+            _ => Some("update"),
+        },
+    }
+}
+
+fn emit(app: &AppHandle, kind: &str, tab_id: &str, host: &str, username: &str, mode: &str) {
     let _ = app.emit_to(
         crate::tabs::CHROME_LABEL,
         "pass-bridge",
@@ -573,6 +643,7 @@ fn emit(app: &AppHandle, kind: &str, tab_id: &str, host: &str, username: &str) {
             tab_id: tab_id.to_string(),
             host: host.to_string(),
             username: username.to_string(),
+            mode: mode.to_string(),
         },
     );
 }

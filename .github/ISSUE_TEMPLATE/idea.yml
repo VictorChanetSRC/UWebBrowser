@@ -1,0 +1,19 @@
+name: Idea or feature request
+description: Something you wish UWebBrowser did.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like UWebBrowser to do?
+      description: Describe the feature or change, and the problem it would solve for you.
+      placeholder: It would help my Unreal workflow if …
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Mockups, examples from other tools, how often you'd use it…
+    validations:
+      required: false

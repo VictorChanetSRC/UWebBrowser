@@ -10,6 +10,7 @@ import news, { type NewsWidget } from "./news";
 import steamList, { type SteamListWidget } from "./steam-list";
 import epicFree, { type EpicFreeWidget } from "./epic-free";
 import workspace, { type WorkspaceWidget } from "./workspace";
+import github, { type GithubWidget } from "./github";
 
 /**
  * The home-board widget registry. A widget exists once someone (1) writes a
@@ -27,7 +28,8 @@ export type DashWidget =
   | NewsWidget
   | SteamListWidget
   | EpicFreeWidget
-  | WorkspaceWidget;
+  | WorkspaceWidget
+  | GithubWidget;
 
 export type DashWidgetType = DashWidget["type"];
 
@@ -45,6 +47,7 @@ export const DASH_WIDGETS: readonly DashWidgetSpec<any>[] = [
   steamList,
   epicFree,
   workspace,
+  github,
 ];
 
 export const DASH_SPECS = Object.fromEntries(

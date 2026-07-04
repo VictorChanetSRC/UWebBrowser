@@ -1,5 +1,6 @@
 mod default_browser;
 pub mod discovery;
+mod github;
 mod history;
 mod http;
 mod news;
@@ -55,6 +56,8 @@ pub fn run() {
             stats::steam_players,
             stats::reddit_search,
             stats::itch_games,
+            github::github_repo_stats,
+            github::github_releases,
             news::fetch_feed,
             news::steam_featured,
             news::epic_free_games,
@@ -81,6 +84,9 @@ pub fn run() {
             passwords::pass_list,
             passwords::pass_matches,
             passwords::pass_save,
+            passwords::pass_reveal,
+            passwords::pass_update,
+            passwords::pass_delete,
             passwords::pass_fill,
             passwords::pass_commit_capture,
             passwords::pass_dismiss_capture,

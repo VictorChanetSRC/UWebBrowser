@@ -16,6 +16,10 @@ export type PassCapabilities = {
   blurb: string;
   canSave: boolean;
   canGenerate: boolean;
+  /** Whether items can be edited / deleted from the panel (local vault yes,
+   *  Proton items are managed through the Proton apps). */
+  canEdit: boolean;
+  canDelete: boolean;
   syncs: boolean;
   needsMasterPassword: boolean;
   /** "password" (local vault) or "token" (Proton) — labels the unlock field. */
@@ -34,6 +38,8 @@ export type CredentialSummary = {
   title: string;
   username: string;
   host: string;
+  /** The stored URL, so editing round-trips it unchanged. */
+  url: string;
 };
 
 export type NewCredential = {
@@ -41,6 +47,14 @@ export type NewCredential = {
   username: string;
   password: string;
   url: string;
+};
+
+/** The secret half of one item, fetched only for explicit copy/edit actions
+ *  in the trusted chrome UI. Never cached — use and drop. */
+export type CredentialSecret = {
+  username: string;
+  password: string;
+  totp?: string;
 };
 
 export type GenerateOptions = {
@@ -57,6 +71,9 @@ export type PassBridgeEvent = {
   tabId: string;
   host: string;
   username: string;
+  /** For `capture`: "new" (first login for this user) or "update" (the saved
+   *  password differs). Empty for other kinds. */
+  mode: "new" | "update" | "";
 };
 
 export const pass = {
@@ -70,6 +87,10 @@ export const pass = {
   list: () => invoke<CredentialSummary[]>("pass_list"),
   matches: (url: string) => invoke<CredentialSummary[]>("pass_matches", { url }),
   save: (item: NewCredential) => invoke<CredentialSummary>("pass_save", { item }),
+  reveal: (id: string) => invoke<CredentialSecret>("pass_reveal", { id }),
+  update: (id: string, item: NewCredential) =>
+    invoke<CredentialSummary>("pass_update", { id, item }),
+  delete: (id: string) => invoke("pass_delete", { id }),
   fill: (tabId: string, itemId: string) => invoke("pass_fill", { tabId, itemId }),
   commitCapture: (tabId: string) => invoke<CredentialSummary>("pass_commit_capture", { tabId }),
   dismissCapture: (tabId: string) => invoke("pass_dismiss_capture", { tabId }),
@@ -153,6 +174,38 @@ export async function initProvider(): Promise<void> {
   } catch {
     // Backend may be unavailable (e.g. Proton CLI missing); the panel surfaces it.
   }
+}
+
+/* ----------------------------- never-save list ---------------------------- */
+// Hosts the user told the save prompt to stop asking about. Chrome-side only:
+// the native side still captures the submit, but App drops it silently for
+// these hosts. Stored per exact host.
+
+const NEVER_KEY = "uwb.passwords.never";
+
+export function loadNeverHosts(): string[] {
+  return loadJson(
+    [NEVER_KEY],
+    (raw) => {
+      const hosts = (raw as { hosts?: unknown } | null)?.hosts;
+      return Array.isArray(hosts) ? hosts.filter((h): h is string => typeof h === "string") : null;
+    },
+    () => [],
+  );
+}
+
+export function addNeverHost(host: string) {
+  if (!host) return;
+  const hosts = loadNeverHosts();
+  if (!hosts.includes(host)) saveJson(NEVER_KEY, { hosts: [...hosts, host] });
+}
+
+export function removeNeverHost(host: string) {
+  saveJson(NEVER_KEY, { hosts: loadNeverHosts().filter((h) => h !== host) });
+}
+
+export function isNeverHost(host: string): boolean {
+  return loadNeverHosts().includes(host);
 }
 
 /** Password-strength estimate (0–4) for the generator/add form meter. Rough by

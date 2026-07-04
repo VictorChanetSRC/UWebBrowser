@@ -13,6 +13,9 @@ import {
   getProviderId,
   type ProviderReport,
 } from "../lib/passwords";
+import { GITHUB_REPO_URL } from "../lib/github";
+import { fmtNumber } from "../lib/format";
+import { FeedbackDialog } from "./FeedbackDialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
@@ -21,11 +24,19 @@ type Props = {
   onUpdate: (settings: BrowserSettings) => void;
   onResetPins: () => void;
   onCustomizeWorkbar: () => void;
+  /** Opens a URL in a browser tab (GitHub issue forms, the repo). */
+  onOpen: (url: string) => void;
 };
 
 type ClearState = "idle" | "confirm" | "working" | "done" | "error";
 
-export function Settings({ settings, onUpdate, onResetPins, onCustomizeWorkbar }: Props) {
+export function Settings({
+  settings,
+  onUpdate,
+  onResetPins,
+  onCustomizeWorkbar,
+  onOpen,
+}: Props) {
   const [version, setVersion] = useState("");
   const [visitCount, setVisitCount] = useState(historyCount);
   const [clearState, setClearState] = useState<ClearState>("idle");
@@ -34,11 +45,17 @@ export function Settings({ settings, onUpdate, onResetPins, onCustomizeWorkbar }
   const [pinsReset, setPinsReset] = useState(false);
   const [providers, setProviders] = useState<ProviderReport[]>([]);
   const [activeProvider, setActiveProvider] = useState(getProviderId);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [stars, setStars] = useState<number | null>(null);
   const resetTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
     pass.providers().then(setProviders).catch(() => {});
+    ipc
+      .githubRepoStats()
+      .then((repoStats) => setStars(repoStats.stars))
+      .catch(() => {});
     return () => window.clearTimeout(resetTimer.current);
   }, []);
 
@@ -221,6 +238,35 @@ export function Settings({ settings, onUpdate, onResetPins, onCustomizeWorkbar }
           </div>
         </SettingsSection>
 
+        <SettingsSection label="Feedback">
+          <div className="flex flex-col divide-y divide-border rounded-xl border border-border">
+            <Row
+              inset
+              title="Report a bug or share an idea"
+              description="Opens a prefilled GitHub issue with your app version and OS already attached."
+            >
+              <Button className="flex-none" onClick={() => setFeedbackOpen(true)}>
+                Send feedback
+              </Button>
+            </Row>
+            <Row
+              inset
+              title="Star UWebBrowser on GitHub"
+              description={
+                stars !== null && stars > 0
+                  ? `Free and open source — ${fmtNumber(stars)} ${
+                      stars === 1 ? "star" : "stars"
+                    } so far. Yours keeps the project moving.`
+                  : "Free and open source. A star is the easiest way to support the project."
+              }
+            >
+              <Button className="flex-none" onClick={() => onOpen(GITHUB_REPO_URL)}>
+                Open GitHub
+              </Button>
+            </Row>
+          </div>
+        </SettingsSection>
+
         <SettingsSection label="About">
           <p className="text-ink-400">
             UWebBrowser {version && <span className="font-mono text-[12.5px]">v{version}</span>}
@@ -229,6 +275,10 @@ export function Settings({ settings, onUpdate, onResetPins, onCustomizeWorkbar }
           </p>
         </SettingsSection>
       </div>
+
+      {feedbackOpen && (
+        <FeedbackDialog onClose={() => setFeedbackOpen(false)} onOpen={onOpen} />
+      )}
     </div>
   );
 }

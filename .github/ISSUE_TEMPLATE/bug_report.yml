@@ -1,0 +1,30 @@
+name: Bug report
+description: Something in UWebBrowser is broken or behaving oddly.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: I opened … and expected … but instead …
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Filled in automatically when you report from inside UWebBrowser
+        (Settings → Feedback). Otherwise, please paste your app version and
+        Windows version.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, the exact page it happened on, how often it happens…
+    validations:
+      required: false

@@ -30,6 +30,8 @@
   var creds = [];
   var host = null; // shadow host element while the dropdown is open
   var dismissed = false;
+  var rows = []; // account row buttons while open, for keyboard navigation
+  var sel = -1; // highlighted row index, -1 when none
 
   function vis(el) {
     if (!el || el.disabled || el.readOnly) return false;
@@ -114,6 +116,16 @@
   function hide() {
     if (host && host.parentNode) host.parentNode.removeChild(host);
     host = null;
+    rows = [];
+    sel = -1;
+  }
+
+  // Highlight one row (keyboard or hover); -1 clears the highlight.
+  function setSel(i) {
+    sel = i;
+    for (var j = 0; j < rows.length; j++)
+      rows[j].style.background = j === sel ? C.line : "transparent";
+    if (sel >= 0 && rows[sel].scrollIntoView) rows[sel].scrollIntoView({ block: "nearest" });
   }
 
   function position(panel, field) {
@@ -133,13 +145,17 @@
     }
   }
 
-  function row(cred) {
+  function row(cred, index) {
     var btn = document.createElement("button");
     btn.type = "button";
     btn.style.cssText =
       "all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;cursor:pointer;";
-    btn.onmouseenter = function () { btn.style.background = C.line; };
-    btn.onmouseleave = function () { btn.style.background = "transparent"; };
+    btn.__pick = function () {
+      pick(cred.id);
+      dismissed = true;
+      hide();
+    };
+    btn.onmouseenter = function () { setSel(index); };
 
     var avatar = document.createElement("span");
     avatar.textContent = ((cred.title || cred.username || "?").trim()[0] || "?").toUpperCase();
@@ -173,9 +189,7 @@
     btn.addEventListener("mousedown", function (e) {
       e.preventDefault();
       e.stopPropagation();
-      pick(cred.id);
-      dismissed = true;
-      hide();
+      btn.__pick();
     });
     return btn;
   }
@@ -224,7 +238,13 @@
 
     var listEl = document.createElement("div");
     listEl.style.cssText = "max-height:232px;overflow-y:auto;padding:4px;";
-    for (var i = 0; i < creds.length; i++) listEl.appendChild(row(creds[i]));
+    rows = [];
+    sel = -1;
+    for (var i = 0; i < creds.length; i++) {
+      var btn = row(creds[i], i);
+      rows.push(btn);
+      listEl.appendChild(btn);
+    }
     panel.appendChild(listEl);
 
     shadow.appendChild(panel);
@@ -266,12 +286,32 @@
     true
   );
 
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && host) {
-      dismissed = true;
-      hide();
-    }
-  });
+  // Keyboard driving while the dropdown is open: arrows move the highlight,
+  // Enter picks it (and never submits the form), Escape dismisses. Capture
+  // phase so the page's own handlers don't race us.
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (!host) return;
+      if (e.key === "Escape") {
+        dismissed = true;
+        hide();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!rows.length) return;
+        if (e.key === "ArrowDown") setSel(sel < 0 ? 0 : (sel + 1) % rows.length);
+        else setSel(sel <= 0 ? rows.length - 1 : sel - 1);
+      } else if (e.key === "Enter" && sel >= 0 && rows[sel]) {
+        e.preventDefault();
+        e.stopPropagation();
+        rows[sel].__pick();
+      } else if (e.key === "Tab") {
+        hide();
+      }
+    },
+    true
+  );
 
   // Offer to save on submit (best effort — the bridge fetch may be blocked by a
   // strict page CSP, in which case saving happens from the panel instead).

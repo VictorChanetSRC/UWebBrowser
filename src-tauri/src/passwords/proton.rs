@@ -136,6 +136,10 @@ impl CredentialProvider for ProtonProvider {
             blurb: "End-to-end encrypted and synced across your devices through the Proton Pass CLI.".to_string(),
             can_save: true,
             can_generate: true,
+            // Item edits and deletions go through the Proton apps; the CLI
+            // only creates.
+            can_edit: false,
+            can_delete: false,
             syncs: true,
             needs_master_password: false,
             unlock_secret: "token".to_string(),
@@ -236,6 +240,7 @@ impl CredentialProvider for ProtonProvider {
             title: item.title,
             username: item.username,
             host: origin::host_of(&item.url).unwrap_or_default(),
+            url: item.url,
         })
     }
 }
@@ -246,6 +251,7 @@ fn row_summary(row: &Row) -> CredentialSummary {
         title: row.title.clone(),
         username: row.username.clone(),
         host: origin::host_of(&row.url).unwrap_or_default(),
+        url: row.url.clone(),
     }
 }
 

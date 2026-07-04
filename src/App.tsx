@@ -18,9 +18,11 @@ import { Workbar } from "./components/Workbar";
 import { PassPanel } from "./components/PassPanel";
 import { PassSaveBanner, type Capture } from "./components/PassSaveBanner";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
+import { StarNudge } from "./components/StarNudge";
+import { startGithubSession } from "./lib/github";
 import { TerminalView } from "./components/TerminalView";
 import { pruneTerminals } from "./lib/terminal";
-import { initProvider, pass } from "./lib/passwords";
+import { initProvider, isNeverHost, pass } from "./lib/passwords";
 import { ipc } from "./lib/ipc";
 import { loadConfig, saveConfig, type UwbConfig } from "./lib/config";
 import { loadSession, saveSession } from "./lib/session";
@@ -143,6 +145,7 @@ export default function App() {
   const [capture, setCapture] = useState<Capture | null>(null);
   const [toast, setToast] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState(false);
+  const [starNudge, setStarNudge] = useState(false);
   const closedUrls = useRef<string[]>([]);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
@@ -311,7 +314,17 @@ export default function App() {
       if (event.kind === "fill") {
         setPassOpen(true);
       } else if (event.kind === "capture") {
-        setCapture({ tabId: event.tabId, host: event.host, username: event.username });
+        // Honor "never for this site": drop the pending capture silently.
+        if (isNeverHost(event.host)) {
+          pass.dismissCapture(event.tabId).catch(() => {});
+          return;
+        }
+        setCapture({
+          tabId: event.tabId,
+          host: event.host,
+          username: event.username,
+          mode: event.mode === "update" ? "update" : "new",
+        });
       }
     });
     return () => {
@@ -384,6 +397,28 @@ export default function App() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [defaultPrompt]);
+
+  // Count this session and, for returning users (or right after an update),
+  // ask for a GitHub star — once, snoozeable, well after launch has settled.
+  // The default-browser prompt owns the same corner and asks first; if it's
+  // up this session, the star ask waits for another day entirely.
+  const defaultPromptRef = useRef(defaultPrompt);
+  defaultPromptRef.current = defaultPrompt;
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (defaultPromptRef.current) return;
+      startGithubSession()
+        .then((show) => {
+          if (!cancelled && !defaultPromptRef.current) setStarNudge(show);
+        })
+        .catch(() => {});
+    }, 6000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const dismissDefaultPrompt = useCallback(() => {
     localStorage.setItem(
@@ -702,6 +737,7 @@ export default function App() {
                 onUpdate={updateSettings}
                 onResetPins={() => setWidgets(seedWidgets())}
                 onCustomizeWorkbar={goWorkbar}
+                onOpen={openNewTab}
               />
             ) : activeTab.url === HISTORY_URL ? (
               <History onOpen={openNewTab} />
@@ -746,12 +782,21 @@ export default function App() {
 
           {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
 
+          {starNudge && !defaultPrompt && (
+            <StarNudge
+              onOpen={openNewTab}
+              onDismiss={() => setStarNudge(false)}
+              onToast={setToast}
+            />
+          )}
+
           {capture && (
             <PassSaveBanner
               capture={capture}
               onDone={(saved) => {
                 setCapture(null);
-                if (saved) setToast("Saved to your vault");
+                if (saved)
+                  setToast(capture.mode === "update" ? "Password updated" : "Saved to your vault");
               }}
             />
           )}
