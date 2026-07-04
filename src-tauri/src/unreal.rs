@@ -259,6 +259,50 @@ pub async fn read_uproject(path: String) -> Result<UProjectInfo, String> {
     })
 }
 
+/// Open a .uproject in the Unreal editor: the matched engine's editor binary
+/// when we know it, otherwise whatever the OS associates with .uproject files
+/// (the Epic version selector on Windows).
+#[tauri::command]
+pub async fn open_uproject(engine_path: Option<String>, uproject: String) -> Result<(), String> {
+    if !PathBuf::from(&uproject).is_file() {
+        return Err(format!("{uproject} doesn't exist — was it moved or deleted?"));
+    }
+    let engine = engine_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty());
+    if let Some(engine) = engine {
+        let binaries = PathBuf::from(engine).join("Engine/Binaries");
+        #[cfg(windows)]
+        let candidates = ["Win64/UnrealEditor.exe", "Win64/UE4Editor.exe"];
+        #[cfg(target_os = "macos")]
+        let candidates = [
+            "Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor",
+            "Mac/UE4Editor.app/Contents/MacOS/UE4Editor",
+        ];
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        let candidates = ["Linux/UnrealEditor", "Linux/UE4Editor"];
+        for rel in candidates {
+            let exe = binaries.join(rel);
+            if exe.is_file() {
+                Command::new(&exe)
+                    .arg(&uproject)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
+    }
+    #[cfg(windows)]
+    let mut cmd = Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("open");
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let mut cmd = Command::new("xdg-open");
+    cmd.arg(&uproject).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildRequest {

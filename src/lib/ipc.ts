@@ -60,6 +60,10 @@ export const ipc = {
   detectEngines: () => invoke<EngineInstall[]>("detect_engines"),
   validateEngine: (path: string) => invoke<EngineInstall>("validate_engine", { path }),
   readUproject: (path: string) => invoke<UProjectInfo>("read_uproject", { path }),
+  /** Open a .uproject in the Unreal editor; `enginePath` picks the binary,
+   *  null falls back to the OS file association. */
+  openUproject: (uproject: string, enginePath: string | null) =>
+    invoke("open_uproject", { uproject, enginePath }),
   startBuild: (req: BuildRequest) => invoke("start_build", { req }),
   cancelBuild: (jobId: string) => invoke("cancel_build", { jobId }),
   buildHistory: () => invoke<BuildRecord[]>("build_history"),

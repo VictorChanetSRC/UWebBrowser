@@ -1,36 +1,128 @@
+import { useEffect, useState } from "react";
 import { Hammer } from "lucide-react";
+import { ipc, type EngineInstall } from "@/lib/ipc";
+import { matchEngine, mergeEngines, type UnrealProject } from "@/lib/unreal";
 import {
+  buildJobRunning,
   cancelBuildJob,
   jobProgressCaption,
   jobProgressValue,
   jobRunning,
   jobStatusLabel,
+  startBuildJob,
 } from "@/lib/build-job";
 import { elapsedSince } from "@/lib/format";
 import { useBuildJob } from "@/hooks/use-build-job";
+import { useUnrealState } from "@/hooks/use-unreal-state";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { LiveDot } from "@/components/ui/live-dot";
 import { Progress } from "@/components/ui/progress";
 import { VICTOR_CHANET } from "../types";
-import { defineBarWidget, type BarBodyProps } from "./define";
+import { defineBarWidget, type BarBodyProps, type BarEditorProps } from "./define";
 import { WidgetCard, WidgetHint } from "./shared";
 
-/** The Unreal build in flight, with progress and cancel. */
-export type BuildWidget = { id: string; type: "build" };
+/** The Unreal build in flight — start one, watch it, or open the editor. */
+export type BuildWidget = {
+  id: string;
+  type: "build";
+  /** Which linked project to build; empty falls back to the first one. */
+  projectId?: string;
+};
 
-function BuildBody({ onUnreal }: BarBodyProps<BuildWidget>) {
+/** The project this widget acts on: the chosen one, else the first linked. */
+function trackedProject(
+  widget: BuildWidget,
+  projects: UnrealProject[],
+): UnrealProject | null {
+  return projects.find((p) => p.id === widget.projectId) ?? projects[0] ?? null;
+}
+
+function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
   const job = useBuildJob();
+  const [unrealState] = useUnrealState();
+  const [detected, setDetected] = useState<EngineInstall[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!job) {
+  useEffect(() => {
+    if (!active) return;
+    ipc.detectEngines().then(setDetected).catch(() => {});
+  }, [active]);
+
+  const engines = mergeEngines(detected, unrealState.manualEngines);
+  const project = trackedProject(widget, unrealState.projects);
+  const engine = project ? matchEngine(project, engines) : null;
+  const running = job !== null && jobRunning(job);
+
+  const packageGame = () => {
+    if (!project || !engine || buildJobRunning()) return;
+    setError(null);
+    startBuildJob(project.name, {
+      enginePath: engine.path,
+      uproject: project.uprojectPath,
+      action: "package",
+      config: "Development",
+      platform: "Win64",
+      archiveDir: project.archiveDir || undefined,
+    });
+  };
+
+  const openEditor = async () => {
+    if (!project) return;
+    setError(null);
+    try {
+      await ipc.openUproject(project.uprojectPath, engine?.path ?? null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  if (!job && !project) {
     return (
       <WidgetCard onClick={onUnreal} title="Open the Unreal toolbench">
-        <WidgetHint>Nothing building. Kick one off from the toolbench.</WidgetHint>
+        <WidgetHint>No project linked. Link a .uproject on the toolbench.</WidgetHint>
       </WidgetCard>
     );
   }
 
-  const running = jobRunning(job);
+  // Package + open-editor, shown whenever a build could start right now.
+  const actions = !running && project && (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="primary"
+        size="sm"
+        className="h-6 px-2 text-[11px]"
+        onClick={packageGame}
+        disabled={!engine}
+        title={engine ? "Package · Development · Win64" : "No engine matched. Link one on the toolbench."}
+      >
+        Package
+      </Button>
+      <Button size="sm" className="h-6 px-2 text-[11px]" onClick={openEditor}>
+        Open editor
+      </Button>
+    </div>
+  );
+
+  if (!job) {
+    return (
+      <WidgetCard>
+        <div
+          className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold text-ink-100"
+          title={project!.uprojectPath}
+        >
+          {project!.name}
+        </div>
+        <span className="font-mono text-[11px] text-ink-500">
+          {engine ? `UE ${engine.version} · Win64` : "No engine matched"}
+        </span>
+        {error && <WidgetHint>{error}</WidgetHint>}
+        {actions}
+      </WidgetCard>
+    );
+  }
+
   const progress = jobProgressValue(job);
   const caption = jobProgressCaption(job);
 
@@ -81,7 +173,33 @@ function BuildBody({ onUnreal }: BarBodyProps<BuildWidget>) {
           </Button>
         )}
       </div>
+      {error && <WidgetHint>{error}</WidgetHint>}
+      {actions}
     </WidgetCard>
+  );
+}
+
+/** Project picker on the work bar page; hidden until there's a real choice. */
+function BuildEditor({ widget, onPatch }: BarEditorProps<BuildWidget>) {
+  const [unrealState] = useUnrealState();
+  if (unrealState.projects.length < 2) return null;
+  const selected = trackedProject(widget, unrealState.projects);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-border p-2.5 pl-3.5">
+      <Label className="mr-1 text-[10px]">Builds</Label>
+      {unrealState.projects.map((project) => (
+        <Button
+          key={project.id}
+          variant="chip"
+          size="chip"
+          className="h-[24px] px-2.5 text-[11px]"
+          aria-pressed={project.id === selected?.id}
+          onClick={() => onPatch({ projectId: project.id })}
+        >
+          {project.name}
+        </Button>
+      ))}
+    </div>
   );
 }
 
@@ -91,12 +209,13 @@ export default defineBarWidget<BuildWidget>({
   creator: VICTOR_CHANET,
   shop: {
     name: "Build status",
-    tagline: "The Unreal build in flight, with progress and cancel.",
+    tagline: "Package the game or open the editor, right from the rail.",
     description:
-      "Kick off a package from the Unreal hub and watch it land from anywhere. " +
-      "Progress, elapsed time and a cancel button, one glance away.",
+      "Kick off a Win64 package or jump into the Unreal editor without leaving " +
+      "the page you're on. While a build runs, progress, elapsed time and a " +
+      "cancel button are one glance away.",
     category: "game",
-    tags: ["unreal", "package", "uproject", "compile", "progress"],
+    tags: ["unreal", "package", "uproject", "compile", "progress", "editor"],
     facts: [
       { label: "Source", value: "Local Unreal toolbench" },
       { label: "Refresh", value: "Live while a job runs" },
@@ -104,8 +223,9 @@ export default defineBarWidget<BuildWidget>({
     ],
     repeatable: false,
   },
-  create: (base) => ({ ...base, type: "build" }),
+  create: (base) => ({ ...base, type: "build", projectId: "" }),
   title: () => "Build",
   Body: BuildBody,
+  Editor: BuildEditor,
   preview: { id: "preview-build", type: "build" },
 });

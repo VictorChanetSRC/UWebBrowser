@@ -62,6 +62,7 @@ pub fn run() {
             unreal::detect_engines,
             unreal::validate_engine,
             unreal::read_uproject,
+            unreal::open_uproject,
             unreal::start_build,
             unreal::cancel_build,
             history::build_history,
