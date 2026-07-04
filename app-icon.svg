@@ -1,8 +1,10 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <!-- App icon: the UWebBrowser mark on an Ink/950 squircle, mark in Ink/100.
-       Geometry transcribed from the brand guidelines PDF; never redraw by hand. -->
+       Geometry transcribed from the brand guidelines PDF; never redraw by hand.
+       Scale 19.8 is the max that keeps 1x node-height (7.3u) clear space inside
+       the squircle, including at the rounded corners. -->
   <rect x="64" y="64" width="896" height="896" rx="224" fill="#0A0A0B"/>
-  <g transform="translate(325.4 325.4) scale(15.55)">
+  <g transform="translate(274.4 274.4) scale(19.8)">
     <circle cx="12" cy="12" r="10" stroke="#F2F1F4" stroke-width="2.9"/>
     <ellipse cx="12" cy="12" rx="4.05" ry="10" stroke="#F2F1F4" stroke-width="2.9"/>
     <path d="M2 12h20" stroke="#F2F1F4" stroke-width="2.9" stroke-linecap="round"/>

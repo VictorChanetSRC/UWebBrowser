@@ -7,6 +7,7 @@ import {
   Copy,
   Globe,
   Hammer,
+  History as HistoryIcon,
   House,
   KeyRound,
   Lock,
@@ -44,6 +45,7 @@ type Props = {
   onDiscover: () => void;
   onUnreal: () => void;
   onTerminal: () => void;
+  onHistory: () => void;
   onSettings: () => void;
   onPasswords: () => void;
   onTogglePin: () => void;
@@ -184,6 +186,9 @@ function ToolbarImpl(props: Props) {
         </IconButton>
         <IconButton label="Terminal · Ctrl+`" onClick={props.onTerminal}>
           <TerminalIcon aria-hidden />
+        </IconButton>
+        <IconButton label="History · Ctrl+H" onClick={props.onHistory}>
+          <HistoryIcon aria-hidden />
         </IconButton>
       </div>
 

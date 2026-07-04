@@ -34,7 +34,7 @@ function SidebarImpl({
   const shown = widgets.filter(visible);
 
   return (
-    <aside className="flex w-[240px] flex-none flex-col border-r border-border bg-background">
+    <aside className="flex h-full w-full flex-col border-r border-border bg-background">
       <div className="flex items-center justify-between px-[18px] pb-1 pt-3.5">
         <Label className="text-[10.5px]">Work bar</Label>
         <button

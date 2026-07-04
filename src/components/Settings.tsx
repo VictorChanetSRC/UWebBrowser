@@ -150,7 +150,7 @@ export function Settings({ settings, onUpdate, onResetPins, onCustomizeWorkbar }
               description={
                 historyCleared
                   ? "History cleared."
-                  : `${visitCount} ${visitCount === 1 ? "page" : "pages"} remembered for address bar suggestions.`
+                  : `${visitCount} ${visitCount === 1 ? "page" : "pages"} remembered. Browse and search them on the History page (Ctrl+H).`
               }
             >
               <Button

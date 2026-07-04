@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { TitleBar } from "./components/TitleBar";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { Discover } from "./components/Discover";
 import { Settings } from "./components/Settings";
+import { History } from "./components/History";
 import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { PassPanel } from "./components/PassPanel";
@@ -49,8 +57,14 @@ export const UNREAL_URL = "uwb://unreal";
 export const SETTINGS_URL = "uwb://settings";
 export const WORKBAR_URL = "uwb://workbar";
 export const TERMINAL_URL = "uwb://terminal";
+export const HISTORY_URL = "uwb://history";
 const TOP_INSET = 92; // 44px title bar + 48px toolbar
-const SIDEBAR_WIDTH = 240;
+const SIDEBAR_DEFAULT_WIDTH = 240;
+const SIDEBAR_MIN_WIDTH = 200;
+const SIDEBAR_MAX_WIDTH = 440;
+
+const clampSidebarWidth = (width: number) =>
+  Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 // Panel is 384px wide at right-2 (8px); reserve it plus an 8px gap so the
 // page shrinks beside the password panel instead of being hidden behind it.
 const PASS_PANEL_RESERVE = 400;
@@ -69,7 +83,9 @@ const internalTitle = (url: string) =>
           ? "Work bar"
           : url === TERMINAL_URL
             ? "Terminal"
-            : "New tab";
+            : url === HISTORY_URL
+              ? "History"
+              : "New tab";
 
 const homeTab = (url: string = HOME_URL): Tab => ({
   id: crypto.randomUUID(),
@@ -88,6 +104,7 @@ function normalizeInput(raw: string, searchUrl: (query: string) => string): stri
     if (input.includes("settings")) return SETTINGS_URL;
     if (input.includes("workbar") || input.includes("widget")) return WORKBAR_URL;
     if (input.includes("term")) return TERMINAL_URL;
+    if (input.includes("history")) return HISTORY_URL;
     return HOME_URL;
   }
   if (/^(https?|file):\/\//i.test(input)) return input;
@@ -108,6 +125,13 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => localStorage.getItem("uwb.sidebar") !== "0",
   );
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const stored = Number(localStorage.getItem("uwb.sidebarWidth"));
+    return Number.isFinite(stored) && stored > 0
+      ? clampSidebarWidth(stored)
+      : SIDEBAR_DEFAULT_WIDTH;
+  });
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   const [config, setConfig] = useState<UwbConfig>(loadConfig);
   const [widgets, setWidgets] = useState<Widget[]>(loadWidgets);
   const [settings, setSettings] = useState<BrowserSettings>(loadSettings);
@@ -137,7 +161,7 @@ export default function App() {
       // effect below hasn't reached the backend yet — without this the
       // restored page is created at 0,0 and covers the whole window.
       await ipc
-        .setContentInsets(TOP_INSET, sidebarOpen ? SIDEBAR_WIDTH : 0, 0)
+        .setContentInsets(TOP_INSET, sidebarOpen ? sidebarWidth : 0, 0)
         .catch(() => {});
       for (const tab of webTabs) {
         // Fails harmlessly if the webview already exists (dev double-mount).
@@ -169,13 +193,50 @@ export default function App() {
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
 
   // Tell the native side where the content area starts. While the password
-  // panel is open the page shrinks to leave it room, staying visible.
+  // panel is open the page shrinks to leave it room, staying visible. Pushes
+  // are skipped mid-drag (the webview is hidden then); the final width lands
+  // here once the drag ends.
   useEffect(() => {
-    const left = sidebarOpen ? SIDEBAR_WIDTH : 0;
+    if (sidebarResizing) return;
+    const left = sidebarOpen ? sidebarWidth : 0;
     const right = passOpen ? PASS_PANEL_RESERVE : 0;
     ipc.setContentInsets(TOP_INSET, left, right).catch(() => {});
     localStorage.setItem("uwb.sidebar", sidebarOpen ? "1" : "0");
-  }, [sidebarOpen, passOpen]);
+    localStorage.setItem("uwb.sidebarWidth", String(sidebarWidth));
+  }, [sidebarOpen, passOpen, sidebarWidth, sidebarResizing]);
+
+  // Resizing happens entirely in the chrome layer: the native tab webview is
+  // hidden for the duration (it paints over the chrome and would swallow
+  // pointer events once the cursor crossed onto it), then re-shown at the
+  // final width on release.
+  const startSidebarResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setSidebarResizing(true);
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (tab?.kind === "web") ipc.activateTab(null).catch(() => {});
+  };
+
+  const moveSidebarResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    setSidebarWidth(clampSidebarWidth(e.clientX));
+  };
+
+  const endSidebarResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const width = clampSidebarWidth(e.clientX);
+    setSidebarWidth(width);
+    setSidebarResizing(false);
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (tab?.kind !== "web") return;
+    // Size the webview before showing it so it doesn't flash at the old width.
+    ipc
+      .setContentInsets(TOP_INSET, width, passOpen ? PASS_PANEL_RESERVE : 0)
+      .catch(() => {})
+      .then(() => ipc.activateTab(tab.id))
+      .catch(() => {});
+  };
 
   const openNewTab = useCallback(
     (url?: string) => {
@@ -433,6 +494,7 @@ export default function App() {
   const goWorkbar = useCallback(() => goInternal(WORKBAR_URL), [goInternal]);
   const goTerminal = useCallback(() => openNewTab(TERMINAL_URL), [openNewTab]);
   const goSettings = useCallback(() => goInternal(SETTINGS_URL), [goInternal]);
+  const goHistory = useCallback(() => goInternal(HISTORY_URL), [goInternal]);
   const goHome = useCallback(() => goInternal(HOME_URL), [goInternal]);
   const openPasswords = useCallback(() => setPassOpen(true), []);
   const onBack = useCallback(() => withWebTab((id) => ipc.goBack(id)), [withWebTab]);
@@ -515,6 +577,11 @@ export default function App() {
         goInternal(SETTINGS_URL);
         return;
       }
+      if (key === "h") {
+        e.preventDefault();
+        goInternal(HISTORY_URL);
+        return;
+      }
       if (e.key === "`") {
         e.preventDefault();
         openNewTab(TERMINAL_URL);
@@ -566,6 +633,7 @@ export default function App() {
         onDiscover={goDiscover}
         onUnreal={goUnreal}
         onTerminal={goTerminal}
+        onHistory={goHistory}
         onSettings={goSettings}
         onPasswords={openPasswords}
         onTogglePin={onTogglePin}
@@ -573,13 +641,17 @@ export default function App() {
       />
       <div className="flex min-h-0">
         {/* Kept mounted and width-animated so toggling doesn't hard-jump the
-            layout; polling is gated by `active` so a collapsed sidebar is idle. */}
+            layout; polling is gated by `active` so a collapsed sidebar is idle.
+            The width transition is dropped while dragging so the bar tracks
+            the pointer instead of easing after it. */}
         <div
-          className="flex-none overflow-hidden transition-[width] duration-[150ms] ease-brand"
-          style={{ width: sidebarOpen ? SIDEBAR_WIDTH : 0 }}
+          className={`relative flex-none overflow-hidden ${
+            sidebarResizing ? "" : "transition-[width] duration-[150ms] ease-brand"
+          }`}
+          style={{ width: sidebarOpen ? sidebarWidth : 0 }}
           aria-hidden={!sidebarOpen}
         >
-          <div style={{ width: SIDEBAR_WIDTH }}>
+          <div className="h-full" style={{ width: sidebarWidth }}>
             <Sidebar
               active={sidebarOpen}
               widgets={widgets}
@@ -591,6 +663,28 @@ export default function App() {
               onCustomize={goWorkbar}
             />
           </div>
+          {/* Resize handle. Lives inside the bar's width — anything to the
+              right is painted over by the native tab webview. */}
+          {sidebarOpen && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize work bar"
+              title="Drag to resize · double-click to reset"
+              className="group absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize touch-none"
+              onPointerDown={startSidebarResize}
+              onPointerMove={moveSidebarResize}
+              onPointerUp={endSidebarResize}
+              onPointerCancel={endSidebarResize}
+              onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+            >
+              <div
+                className={`absolute right-[3px] top-1/2 h-11 w-[3px] -translate-y-1/2 rounded-full transition-colors duration-[130ms] ease-brand ${
+                  sidebarResizing ? "bg-ink-300" : "bg-ink-600 group-hover:bg-ink-300"
+                }`}
+              />
+            </div>
+          )}
         </div>
         <div className="relative min-w-0 flex-1 bg-background">
           {activeTab.kind === "home" ? (
@@ -609,6 +703,8 @@ export default function App() {
                 onResetPins={() => setWidgets(seedWidgets())}
                 onCustomizeWorkbar={goWorkbar}
               />
+            ) : activeTab.url === HISTORY_URL ? (
+              <History onOpen={openNewTab} />
             ) : activeTab.url === TERMINAL_URL ? (
               /* Rendered by the keep-alive layer below. */
               <div className="h-full" />
