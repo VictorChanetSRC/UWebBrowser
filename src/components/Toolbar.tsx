@@ -26,6 +26,10 @@ import { suggestFromHistory, type HistoryEntry } from "../lib/history";
 import type { SearchEngine } from "../lib/settings";
 import { Favicon } from "@/components/ui/favicon";
 import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
+import { usePolled } from "@/hooks/use-polled";
+import { fmtNumber } from "@/lib/format";
+import { ipc } from "@/lib/ipc";
 import { copyText, hostOf } from "@/lib/url";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +54,8 @@ type Props = {
   onPasswords: () => void;
   onTogglePin: () => void;
   onSuggestionsOpen: (open: boolean) => void;
+  /** Opens the UWebBrowser repo — the toolbar's standing ask for a star. */
+  onGithub: () => void;
 };
 
 type Row =
@@ -349,6 +355,8 @@ function ToolbarImpl(props: Props) {
         )}
       </form>
 
+      <GithubStars onClick={props.onGithub} />
+
       <IconButton label="Passwords · Ctrl+Shift+L" onClick={props.onPasswords}>
         <KeyRound aria-hidden />
       </IconButton>
@@ -382,6 +390,33 @@ function parseUrl(url: string): URL | null {
 function pathOf(url: URL): string {
   const path = url.pathname + url.search + url.hash;
   return path === "/" ? "" : path;
+}
+
+/**
+ * Live star count for the app's own repo, one click from the repo page.
+ * The backend caches stats for 15 minutes, so this poll rides the same
+ * fetch as the HQ widget and Settings. Until the first answer (or when
+ * GitHub is unreachable) it's just the star glyph — never a broken number.
+ */
+function GithubStars({ onClick }: { onClick: () => void }) {
+  const { data: stats } = usePolled(() => ipc.githubRepoStats(), [], 900_000);
+  return (
+    <Button
+      variant="ghost"
+      size="none"
+      className="h-[30px] gap-1.5 rounded-[7px] px-2 text-ink-400 [&_svg]:size-3.5"
+      onClick={onClick}
+      aria-label="Star UWebBrowser on GitHub"
+      title="Star UWebBrowser on GitHub"
+    >
+      <Star aria-hidden />
+      {stats !== null && (
+        <span className="font-mono text-[11.5px] leading-none">
+          {fmtNumber(stats.stars)}
+        </span>
+      )}
+    </Button>
+  );
 }
 
 function PillButton(props: {

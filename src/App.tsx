@@ -19,7 +19,7 @@ import { PassPanel } from "./components/PassPanel";
 import { PassSaveBanner, type Capture } from "./components/PassSaveBanner";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
 import { StarNudge } from "./components/StarNudge";
-import { startGithubSession } from "./lib/github";
+import { GITHUB_REPO_URL, startGithubSession } from "./lib/github";
 import { TerminalView } from "./components/TerminalView";
 import { pruneTerminals } from "./lib/terminal";
 import { initProvider, isNeverHost, pass } from "./lib/passwords";
@@ -532,6 +532,7 @@ export default function App() {
   const goHistory = useCallback(() => goInternal(HISTORY_URL), [goInternal]);
   const goHome = useCallback(() => goInternal(HOME_URL), [goInternal]);
   const openPasswords = useCallback(() => setPassOpen(true), []);
+  const goGithub = useCallback(() => openNewTab(GITHUB_REPO_URL), [openNewTab]);
   const onBack = useCallback(() => withWebTab((id) => ipc.goBack(id)), [withWebTab]);
   const onForward = useCallback(() => withWebTab((id) => ipc.goForward(id)), [withWebTab]);
   const onReload = useCallback(() => withWebTab((id) => ipc.reload(id)), [withWebTab]);
@@ -673,6 +674,7 @@ export default function App() {
         onPasswords={openPasswords}
         onTogglePin={onTogglePin}
         onSuggestionsOpen={setOmniboxOpen}
+        onGithub={goGithub}
       />
       <div className="flex min-h-0">
         {/* Kept mounted and width-animated so toggling doesn't hard-jump the
