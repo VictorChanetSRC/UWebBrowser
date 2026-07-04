@@ -15,6 +15,7 @@ import { pruneTerminals } from "./lib/terminal";
 import { initProvider, pass } from "./lib/passwords";
 import { ipc } from "./lib/ipc";
 import { loadConfig, saveConfig, type UwbConfig } from "./lib/config";
+import { loadSession, saveSession } from "./lib/session";
 import type { LinkItem } from "./lib/engines";
 import { recordVisit, updateTitle } from "./lib/history";
 import { hostOf, tabLabelFor } from "./lib/url";
@@ -50,6 +51,9 @@ export const WORKBAR_URL = "uwb://workbar";
 export const TERMINAL_URL = "uwb://terminal";
 const TOP_INSET = 92; // 44px title bar + 48px toolbar
 const SIDEBAR_WIDTH = 240;
+// Panel is 384px wide at right-2 (8px); reserve it plus an 8px gap so the
+// page shrinks beside the password panel instead of being hidden behind it.
+const PASS_PANEL_RESERVE = 400;
 const DEFAULT_PROMPT_SNOOZE_KEY = "uwb.defaultBrowser.snoozeUntil";
 const DEFAULT_PROMPT_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
 const DEFAULT_PROMPT_DELAY_MS = 2500;
@@ -97,8 +101,10 @@ function normalizeInput(raw: string, searchUrl: (query: string) => string): stri
 }
 
 export default function App() {
-  const [tabs, setTabs] = useState<Tab[]>(() => [homeTab()]);
-  const [activeId, setActiveId] = useState(() => tabs[0].id);
+  // Restore last session's tabs; webviews for web tabs are recreated below.
+  const [restored] = useState(loadSession);
+  const [tabs, setTabs] = useState<Tab[]>(() => restored?.tabs ?? [homeTab()]);
+  const [activeId, setActiveId] = useState(() => restored?.activeId ?? tabs[0].id);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => localStorage.getItem("uwb.sidebar") !== "0",
   );
@@ -116,6 +122,28 @@ export default function App() {
   const closedUrls = useRef<string[]>([]);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
+  useEffect(() => saveSession(tabs, activeId), [tabs, activeId]);
+
+  // Recreate the native webviews for web tabs restored from the last session,
+  // then show the one that was active. createTab stacks each new webview on
+  // top, so activation waits until all of them exist.
+  useEffect(() => {
+    const webTabs = tabsRef.current.filter((t) => t.kind === "web");
+    if (webTabs.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const tab of webTabs) {
+        // Fails harmlessly if the webview already exists (dev double-mount).
+        await ipc.createTab(tab.id, tab.url).catch(() => {});
+      }
+      if (cancelled) return;
+      const active = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      ipc.activateTab(active?.kind === "web" ? active.id : null).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Kill PTY sessions whose tab is gone (closed, or navigated away from
   // uwb://terminal). Creation happens in TerminalView on first mount.
@@ -133,12 +161,14 @@ export default function App() {
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
 
-  // Tell the native side where the content area starts.
+  // Tell the native side where the content area starts. While the password
+  // panel is open the page shrinks to leave it room, staying visible.
   useEffect(() => {
     const left = sidebarOpen ? SIDEBAR_WIDTH : 0;
-    ipc.setContentInsets(TOP_INSET, left).catch(() => {});
+    const right = passOpen ? PASS_PANEL_RESERVE : 0;
+    ipc.setContentInsets(TOP_INSET, left, right).catch(() => {});
     localStorage.setItem("uwb.sidebar", sidebarOpen ? "1" : "0");
-  }, [sidebarOpen]);
+  }, [sidebarOpen, passOpen]);
 
   const openNewTab = useCallback(
     (url?: string) => {
@@ -196,14 +226,14 @@ export default function App() {
     ipc.activateTab(tab.kind === "web" ? tab.id : null).catch(() => {});
   }, []);
 
-  // The native tab webview paints over any chrome overlay, so hide it while the
-  // omnibox suggestions or the password panel are showing.
+  // The native tab webview paints over any chrome overlay, so hide it while
+  // the omnibox suggestions are showing. (The password panel instead reserves
+  // a right inset above, so the page stays visible beside it.)
   useEffect(() => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
     if (tab?.kind !== "web") return;
-    const hideTab = omniboxOpen || passOpen;
-    ipc.activateTab(hideTab ? null : tab.id).catch(() => {});
-  }, [omniboxOpen, passOpen]);
+    ipc.activateTab(omniboxOpen ? null : tab.id).catch(() => {});
+  }, [omniboxOpen]);
 
   // Sync the native backend to the user's saved choice on boot, then listen for
   // events from the injected content script (inline fill click, save prompt).

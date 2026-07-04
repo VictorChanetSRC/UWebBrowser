@@ -1,0 +1,52 @@
+/** The open-tab session, persisted across launches. App saves it on every
+ *  tab change and recreates the web tabs' webviews at boot. Lives in the
+ *  chrome webview's own profile, so clearing site data never drops it. */
+
+import type { Tab } from "../App";
+
+const KEY = "uwb.session";
+
+type SavedTab = Pick<Tab, "id" | "kind" | "url" | "title">;
+type SavedSession = { tabs: SavedTab[]; activeId: string };
+
+export function saveSession(tabs: Tab[], activeId: string) {
+  const session: SavedSession = {
+    tabs: tabs.map(({ id, kind, url, title }) => ({ id, kind, url, title })),
+    activeId,
+  };
+  try {
+    localStorage.setItem(KEY, JSON.stringify(session));
+  } catch {
+    /* best-effort; failing to save just means no restore next launch */
+  }
+}
+
+export function loadSession(): { tabs: Tab[]; activeId: string } | null {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as SavedSession;
+    const tabs: Tab[] = (Array.isArray(saved.tabs) ? saved.tabs : [])
+      .filter(
+        (t) =>
+          t &&
+          typeof t.id === "string" &&
+          typeof t.url === "string" &&
+          (t.kind === "web" || t.kind === "home"),
+      )
+      .map((t) => ({
+        id: t.id,
+        kind: t.kind,
+        url: t.url,
+        title: typeof t.title === "string" ? t.title : "",
+        loading: t.kind === "web",
+      }));
+    if (tabs.length === 0) return null;
+    const activeId = tabs.some((t) => t.id === saved.activeId)
+      ? saved.activeId
+      : tabs[0].id;
+    return { tabs, activeId };
+  } catch {
+    return null;
+  }
+}

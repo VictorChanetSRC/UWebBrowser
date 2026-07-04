@@ -18,6 +18,9 @@ pub struct TabsState {
 pub struct Insets {
     pub top: f64,
     pub left: f64,
+    /// Space reserved on the right for chrome overlays (the password panel);
+    /// keeps the page visible beside them instead of hiding the webview.
+    pub right: f64,
 }
 
 #[derive(Clone, Serialize)]
@@ -81,7 +84,7 @@ fn content_rect(
     Ok((
         LogicalPosition::new(insets.left, insets.top),
         LogicalSize::new(
-            (size.width - insets.left).max(1.0),
+            (size.width - insets.left - insets.right).max(1.0),
             (size.height - insets.top).max(1.0),
         ),
     ))
@@ -261,8 +264,9 @@ pub async fn set_content_insets(
     state: tauri::State<'_, TabsState>,
     top: f64,
     left: f64,
+    right: f64,
 ) -> Result<(), String> {
-    *state.insets.lock().unwrap() = Insets { top, left };
+    *state.insets.lock().unwrap() = Insets { top, left, right };
     apply_bounds_to_all(&app);
     Ok(())
 }

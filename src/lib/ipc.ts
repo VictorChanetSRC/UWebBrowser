@@ -25,8 +25,8 @@ export const ipc = {
   goForward: (id: string) => invoke("tab_eval", { id, js: "history.forward()" }),
   reload: (id: string) => invoke("tab_eval", { id, js: "location.reload()" }),
   stop: (id: string) => invoke("tab_eval", { id, js: "window.stop()" }),
-  setContentInsets: (top: number, left: number) =>
-    invoke("set_content_insets", { top, left }),
+  setContentInsets: (top: number, left: number, right: number) =>
+    invoke("set_content_insets", { top, left, right }),
   clearBrowsingData: () => invoke("clear_browsing_data"),
   steamStats: (appid: string) => invoke<SteamStats>("steam_stats", { appid }),
   redditSearch: (query: string) => invoke<RedditPost[]>("reddit_search", { query }),
