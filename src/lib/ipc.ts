@@ -29,6 +29,7 @@ export const ipc = {
     invoke("set_content_insets", { top, left, right }),
   clearBrowsingData: () => invoke("clear_browsing_data"),
   steamStats: (appid: string) => invoke<SteamStats>("steam_stats", { appid }),
+  steamPlayers: (appid: string) => invoke<number | null>("steam_players", { appid }),
   redditSearch: (query: string) => invoke<RedditPost[]>("reddit_search", { query }),
   itchGames: (apiKey: string) => invoke<ItchGame[]>("itch_games", { apiKey }),
   fetchFeed: (url: string) => invoke<FeedItem[]>("fetch_feed", { url }),

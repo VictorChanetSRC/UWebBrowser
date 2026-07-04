@@ -52,6 +52,7 @@ pub fn run() {
             default_browser::open_default_browser_settings,
             default_browser::take_startup_urls,
             stats::steam_stats,
+            stats::steam_players,
             stats::reddit_search,
             stats::itch_games,
             news::fetch_feed,

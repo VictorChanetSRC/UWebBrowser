@@ -26,7 +26,8 @@ const LEGACY_PINS_KEY = "gdb.pins";
 const uid = () => crypto.randomUUID();
 
 const statusWidgets = (): Widget[] => [
-  { id: uid(), type: "steam", gameId: null },
+  { id: uid(), type: "steam-game", gameId: null },
+  { id: uid(), type: "steam-players", gameId: null },
   { id: uid(), type: "build" },
   { id: uid(), type: "system" },
 ];
@@ -52,10 +53,23 @@ export function loadWidgets(): Widget[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        const widgets = parsed.filter(
+        // The one-card Steam ticker split into a game card and a players
+        // graph; expand stored copies into both so nobody loses a widget.
+        const expanded = parsed.flatMap((w) =>
+          w && w.type === "steam"
+            ? [
+                { ...w, type: "steam-game" },
+                { id: uid(), type: "steam-players", gameId: w.gameId ?? null },
+              ]
+            : [w],
+        );
+        const widgets = expanded.filter(
           (w): w is Widget => w && BAR_WIDGET_TYPES.includes(w.type),
         );
-        if (widgets.length > 0) return widgets;
+        if (widgets.length > 0) {
+          if (expanded.length !== parsed.length) saveWidgets(widgets);
+          return widgets;
+        }
       }
     }
     // Migrate a pre-widget work bar: keep the link sections, add the live widgets.

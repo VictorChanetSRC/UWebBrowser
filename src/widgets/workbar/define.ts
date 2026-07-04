@@ -57,7 +57,7 @@ export type BarWidgetSpec<W extends BarWidgetBase = BarWidgetBase> = {
   Body: ComponentType<BarBodyProps<W>>;
   /**
    * Optional editor rendered under the widget's row on the work bar page —
-   * the place for pickers and item lists (see links/steam for examples).
+   * the place for pickers and item lists (see links/steam-game for examples).
    * Return null when there is nothing to edit right now.
    */
   Editor?: ComponentType<BarEditorProps<W>>;

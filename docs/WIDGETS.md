@@ -201,7 +201,8 @@ Work bar specs have two extra optional powers, both visible in `links.tsx`:
 
 - **`Editor`** — a section rendered under the widget's row on the
   `uwb://workbar` page. This is where pickers and item lists live
-  (`steam.tsx` has a minimal example). Receives `{ widget, games, onPatch }`;
+  (`steam-game.tsx` uses the shared `TracksGameEditor`). Receives
+  `{ widget, games, onPatch }`;
   call `onPatch(partial)` to persist.
 - **`rename`** — declare `{ value, patch }` and the row title becomes an
   in-place rename input for free.

@@ -1,7 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import type { ShopEntry } from "@/lib/widget-shop";
 import type { BarBodyProps, BarEditorProps, BarWidgetSpec } from "./define";
-import steam, { type SteamWidget } from "./steam";
+import steamGame, { type SteamGameWidget } from "./steam-game";
+import steamPlayers, { type SteamPlayersWidget } from "./steam-players";
 import build, { type BuildWidget } from "./build";
 import system, { type SystemWidget } from "./system";
 import itch, { type ItchWidget } from "./itch";
@@ -15,7 +16,13 @@ import links, { type LinksWidget } from "./links";
  * Full walkthrough: docs/WIDGETS.md.
  */
 
-export type Widget = LinksWidget | SteamWidget | BuildWidget | SystemWidget | ItchWidget;
+export type Widget =
+  | LinksWidget
+  | SteamGameWidget
+  | SteamPlayersWidget
+  | BuildWidget
+  | SystemWidget
+  | ItchWidget;
 
 export type WidgetType = Widget["type"];
 
@@ -24,7 +31,14 @@ export type WidgetType = Widget["type"];
  * file; the registry views them through the loose base shape — the dispatch
  * helpers below are the only places that cross that line.
  */
-export const BAR_WIDGETS: readonly BarWidgetSpec<any>[] = [steam, build, itch, system, links];
+export const BAR_WIDGETS: readonly BarWidgetSpec<any>[] = [
+  steamGame,
+  steamPlayers,
+  build,
+  itch,
+  system,
+  links,
+];
 
 export const BAR_SPECS = Object.fromEntries(
   BAR_WIDGETS.map((spec) => [spec.type, spec]),

@@ -32,6 +32,19 @@ pub async fn steam_stats(appid: String) -> Result<Value, String> {
     }))
 }
 
+/// Just the live player count — the one Steam number cheap enough to poll
+/// every 30 s. Returns the raw count (or null when Steam has none).
+#[tauri::command]
+pub async fn steam_players(appid: String) -> Result<Value, String> {
+    let appid: u64 = appid.trim().parse().map_err(|_| "invalid App ID")?;
+    let client = http::shared()?;
+    let url = format!(
+        "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={appid}"
+    );
+    let players = get_json(client, &url).await?;
+    Ok(players["response"]["player_count"].clone())
+}
+
 /// Recent posts mentioning the game. Reddit hard-403s its JSON API for
 /// unauthenticated non-browser clients, but the RSS mirror of the same
 /// search tolerates browser-shaped requests at polite rates — so we read
