@@ -132,6 +132,13 @@ export default function App() {
     if (webTabs.length === 0) return;
     let cancelled = false;
     (async () => {
+      // Push the chrome layout to the native side before any webview exists:
+      // createTab sizes the page from these insets, and at boot the layout
+      // effect below hasn't reached the backend yet — without this the
+      // restored page is created at 0,0 and covers the whole window.
+      await ipc
+        .setContentInsets(TOP_INSET, sidebarOpen ? SIDEBAR_WIDTH : 0, 0)
+        .catch(() => {});
       for (const tab of webTabs) {
         // Fails harmlessly if the webview already exists (dev double-mount).
         await ipc.createTab(tab.id, tab.url).catch(() => {});

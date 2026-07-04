@@ -177,6 +177,10 @@ pub async fn create_tab(
     }
 
     window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
+    // The chrome UI reports its insets asynchronously; if they arrived while
+    // this webview was being built, the rect computed above is stale and the
+    // page would cover the chrome. Re-position from the current insets.
+    apply_bounds_to_all(&app);
     Ok(())
 }
 
