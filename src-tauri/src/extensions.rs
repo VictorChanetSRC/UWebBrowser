@@ -183,7 +183,10 @@ fn icon_data_uri(dir: &std::path::Path, manifest: &serde_json::Value) -> Option<
     }
 
     let (_, rel) = best?;
-    let path = dir.join(rel.replace('/', &std::path::MAIN_SEPARATOR.to_string()));
+    // Extension asset paths are root-relative and often start with `/`; a
+    // leading separator would make `join` treat them as absolute (C:\assets\…),
+    // so strip it. Windows accepts the remaining forward slashes as-is.
+    let path = dir.join(rel.trim_start_matches(['/', '\\']));
     let bytes = std::fs::read(&path).ok()?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -441,18 +444,35 @@ pub async fn ext_open_popup(
 ) -> Result<(), String> {
     use tauri::{LogicalPosition, LogicalSize, Url, WebviewUrl};
 
+    // Guard against a bad runtime id: an empty/short id yields
+    // `chrome-extension:///…`, which WebView2 can't resolve and silently
+    // replaces with its new-tab page (chrome-search://local-ntp).
+    let id = id.trim();
+    if id.len() != 32 || !id.bytes().all(|b| (b'a'..=b'p').contains(&b)) {
+        return Err(format!("extension id looks wrong ({id:?})"));
+    }
+    let popup = popup.trim().trim_start_matches('/');
+    if popup.is_empty() {
+        return Err("this extension has no popup page".to_string());
+    }
+
     // Replace any popup already showing.
     if let Some(existing) = app.get_webview(EXT_POPUP_LABEL) {
         let _ = existing.close();
     }
 
     let window = app.get_window("main").ok_or("main window not found")?;
-    let url = format!("chrome-extension://{id}/{}", popup.trim_start_matches('/'));
-    let parsed = Url::parse(&url).map_err(|e| e.to_string())?;
+    let target = format!("chrome-extension://{id}/{popup}");
+    let parsed = Url::parse(&target).map_err(|e| e.to_string())?;
 
-    let mut builder = tauri::webview::WebviewBuilder::new(EXT_POPUP_LABEL, WebviewUrl::External(parsed))
-        .browser_extensions_enabled(true)
-        .disable_drag_drop_handler();
+    // Start at about:blank and navigate afterward: WebView2 rejects a
+    // chrome-extension:// URL as a webview's *initial* source and falls back to
+    // its new-tab page, but a post-creation navigation to it resolves fine.
+    let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
+    let mut builder =
+        tauri::webview::WebviewBuilder::new(EXT_POPUP_LABEL, WebviewUrl::External(blank))
+            .browser_extensions_enabled(true)
+            .disable_drag_drop_handler();
     // Share the tab profile so the popup and the content scripts see the same
     // extension background/storage (this is what lets a login in the popup
     // unlock autofill on the page).
@@ -463,13 +483,14 @@ pub async fn ext_open_popup(
         builder = builder.extensions_path(dir);
     }
 
-    window
+    let popup_view = window
         .add_child(
             builder,
             LogicalPosition::new(x, y),
             LogicalSize::new(width.max(120.0), height.max(120.0)),
         )
         .map_err(|e| e.to_string())?;
+    popup_view.navigate(parsed).map_err(|e| e.to_string())?;
     Ok(())
 }
 
