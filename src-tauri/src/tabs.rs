@@ -247,6 +247,18 @@ pub async fn tab_eval(app: AppHandle, id: String, js: String) -> Result<(), Stri
     webview.eval(&js).map_err(|e| e.to_string())
 }
 
+/// The tab's *current* document URL, read live from the engine. Single-page
+/// apps (the Chrome Web Store, etc.) navigate via the History API, which raises
+/// no page-load event, so the frontend polls this to keep the omnibox — and the
+/// Web Store "Add" button — in step with client-side route changes.
+#[tauri::command]
+pub async fn tab_live_url(app: AppHandle, id: String) -> Result<String, String> {
+    let webview = app
+        .get_webview(&tab_label(&id))
+        .ok_or("tab webview not found")?;
+    webview.url().map(|u| u.to_string()).map_err(|e| e.to_string())
+}
+
 /// Clear cache, cookies and site data for the browsing profile. While tab
 /// webviews are alive the engine clears the profile in place; with no tabs
 /// open the profile directory is simply deleted from disk.

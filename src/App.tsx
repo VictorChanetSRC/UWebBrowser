@@ -310,6 +310,27 @@ export default function App() {
     ipc.activateTab(tab.kind === "web" ? tab.id : null).catch(() => {});
   }, []);
 
+  // Poll the active web tab's live URL. SPAs (the Chrome Web Store especially)
+  // route via the History API, which raises no native navigation event — so
+  // without this the omnibox and the store "Add to UWebBrowser" button would
+  // never see that you've moved to an extension's detail page.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      if (tab?.kind !== "web") return;
+      ipc
+        .tabLiveUrl(tab.id)
+        .then((url) => {
+          if (!url) return;
+          setTabs((prev) =>
+            prev.map((t) => (t.id === tab.id && t.url !== url ? { ...t, url } : t)),
+          );
+        })
+        .catch(() => {});
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, []);
+
   // The native tab webview paints over any chrome overlay, so hide it while
   // the omnibox suggestions are showing. (The password panel instead reserves
   // a right inset above, so the page stays visible beside it.)

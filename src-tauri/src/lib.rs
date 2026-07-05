@@ -44,6 +44,7 @@ pub fn run() {
             tabs::close_tab,
             tabs::activate_tab,
             tabs::tab_eval,
+            tabs::tab_live_url,
             tabs::set_content_insets,
             tabs::clear_browsing_data,
             extensions::ext_list,

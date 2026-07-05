@@ -25,6 +25,9 @@ export const ipc = {
   goForward: (id: string) => invoke("tab_eval", { id, js: "history.forward()" }),
   reload: (id: string) => invoke("tab_eval", { id, js: "location.reload()" }),
   stop: (id: string) => invoke("tab_eval", { id, js: "window.stop()" }),
+  /** The tab's live document URL — tracks History-API (SPA) navigations that
+   *  fire no page-load event. */
+  tabLiveUrl: (id: string) => invoke<string>("tab_live_url", { id }),
   setContentInsets: (top: number, left: number, right: number) =>
     invoke("set_content_insets", { top, left, right }),
   clearBrowsingData: () => invoke("clear_browsing_data"),
