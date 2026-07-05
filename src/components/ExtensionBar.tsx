@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Plus, Puzzle } from "lucide-react";
+import { Plus, Puzzle, Store } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ipc, type ExtInfo } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -7,12 +7,18 @@ import { cn } from "@/lib/utils";
 const POPUP_WIDTH = 400;
 const POPUP_MAX_HEIGHT = 620;
 
+/** The Chrome Web Store landing page. On any extension's detail page the
+ *  toolbar surfaces an "Add to UWebBrowser" button (see Toolbar.tsx). */
+export const WEB_STORE_URL = "https://chromewebstore.google.com/category/extensions";
+
 type Props = {
   extensions: ExtInfo[];
   /** id of the extension whose popup is currently floating, or null. */
   openId: string | null;
   onOpenChange: (id: string | null) => void;
   onExtensionsChange: (next: ExtInfo[]) => void;
+  /** Open the Chrome Web Store in a new tab. */
+  onBrowseStore: () => void;
   onToast: (message: string) => void;
 };
 
@@ -26,6 +32,7 @@ export function ExtensionBar({
   openId,
   onOpenChange,
   onExtensionsChange,
+  onBrowseStore,
   onToast,
 }: Props) {
   const toggle = useCallback(
@@ -99,6 +106,16 @@ export function ExtensionBar({
           ))
         )}
       </div>
+      <button
+        type="button"
+        onClick={onBrowseStore}
+        aria-label="Open the Chrome Web Store"
+        title="Browse the Chrome Web Store"
+        className="flex flex-none items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-ink-300 transition-colors duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100"
+      >
+        <Store className="size-3.5" aria-hidden />
+        Web Store
+      </button>
       <button
         type="button"
         onClick={loadUnpacked}

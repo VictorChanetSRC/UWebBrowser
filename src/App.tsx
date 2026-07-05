@@ -17,11 +17,10 @@ import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { PassPanel } from "./components/PassPanel";
 import { PassSaveBanner, type Capture } from "./components/PassSaveBanner";
-import { ExtensionBar } from "./components/ExtensionBar";
+import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
-import { StarNudge } from "./components/StarNudge";
-import { GITHUB_REPO_URL, startGithubSession } from "./lib/github";
+import { GITHUB_REPO_URL } from "./lib/github";
 import { TerminalView } from "./components/TerminalView";
 import { pruneTerminals } from "./lib/terminal";
 import { initProvider, isNeverHost, pass } from "./lib/passwords";
@@ -148,7 +147,6 @@ export default function App() {
   const [capture, setCapture] = useState<Capture | null>(null);
   const [toast, setToast] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState(false);
-  const [starNudge, setStarNudge] = useState(false);
   const [extensions, setExtensions] = useState<ExtInfo[]>([]);
   const [openExtId, setOpenExtId] = useState<string | null>(null);
   const [extBarOpen, setExtBarOpen] = useState(
@@ -444,28 +442,6 @@ export default function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [defaultPrompt]);
 
-  // Count this session and, for returning users (or right after an update),
-  // ask for a GitHub star — once, snoozeable, well after launch has settled.
-  // The default-browser prompt owns the same corner and asks first; if it's
-  // up this session, the star ask waits for another day entirely.
-  const defaultPromptRef = useRef(defaultPrompt);
-  defaultPromptRef.current = defaultPrompt;
-  useEffect(() => {
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (defaultPromptRef.current) return;
-      startGithubSession()
-        .then((show) => {
-          if (!cancelled && !defaultPromptRef.current) setStarNudge(show);
-        })
-        .catch(() => {});
-    }, 6000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, []);
-
   const dismissDefaultPrompt = useCallback(() => {
     localStorage.setItem(
       DEFAULT_PROMPT_SNOOZE_KEY,
@@ -757,6 +733,7 @@ export default function App() {
           openId={openExtId}
           onOpenChange={setOpenExtId}
           onExtensionsChange={setExtensions}
+          onBrowseStore={() => openNewTab(WEB_STORE_URL)}
           onToast={setToast}
         />
       )}
@@ -867,14 +844,6 @@ export default function App() {
             ))}
 
           {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
-
-          {starNudge && !defaultPrompt && (
-            <StarNudge
-              onOpen={openNewTab}
-              onDismiss={() => setStarNudge(false)}
-              onToast={setToast}
-            />
-          )}
 
           {capture && (
             <PassSaveBanner
