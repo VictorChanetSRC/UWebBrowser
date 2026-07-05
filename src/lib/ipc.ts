@@ -28,6 +28,22 @@ export const ipc = {
   setContentInsets: (top: number, left: number, right: number) =>
     invoke("set_content_insets", { top, left, right }),
   clearBrowsingData: () => invoke("clear_browsing_data"),
+  /** Installed Chrome extensions, for the pinned bar (Windows/WebView2 only). */
+  extList: () => invoke<ExtInfo[]>("ext_list"),
+  /** Copy an unpacked extension folder into the store and install it live. */
+  extImport: (source: string) => invoke<ExtInfo[]>("ext_import", { source }),
+  /** Install straight from the Chrome Web Store by extension id. */
+  extInstallFromStore: (id: string) => invoke<ExtInfo[]>("ext_install_from_store", { id }),
+  /** Float an extension's popup as a child webview (logical px coordinates). */
+  extOpenPopup: (
+    id: string,
+    popup: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => invoke("ext_open_popup", { id, popup, x, y, width, height }),
+  extClosePopup: () => invoke("ext_close_popup"),
   steamStats: (appid: string) => invoke<SteamStats>("steam_stats", { appid }),
   steamPlayers: (appid: string) => invoke<number | null>("steam_players", { appid }),
   redditSearch: (query: string) => invoke<RedditPost[]>("reddit_search", { query }),
@@ -78,6 +94,16 @@ export const ipc = {
   systemStats: () => invoke<SystemStats>("system_stats"),
   onBuildEvent: (handler: (payload: BuildEventPayload) => void): Promise<UnlistenFn> =>
     listen<BuildEventPayload>("build-event", (event) => handler(event.payload)),
+};
+
+/** One installed browser extension. `popup` is the action popup page (null if
+ *  the extension has none); `icon` is a ready-to-render data: URI. */
+export type ExtInfo = {
+  id: string;
+  name: string;
+  popup: string | null;
+  icon: string | null;
+  enabled: boolean;
 };
 
 export type SteamStats = {

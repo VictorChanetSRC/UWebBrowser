@@ -17,6 +17,8 @@ import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { PassPanel } from "./components/PassPanel";
 import { PassSaveBanner, type Capture } from "./components/PassSaveBanner";
+import { ExtensionBar } from "./components/ExtensionBar";
+import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
 import { StarNudge } from "./components/StarNudge";
 import { GITHUB_REPO_URL, startGithubSession } from "./lib/github";
@@ -61,6 +63,7 @@ export const WORKBAR_URL = "uwb://workbar";
 export const TERMINAL_URL = "uwb://terminal";
 export const HISTORY_URL = "uwb://history";
 const TOP_INSET = 92; // 44px title bar + 48px toolbar
+const EXT_BAR_HEIGHT = 34; // pinned extensions strip, when shown
 const SIDEBAR_DEFAULT_WIDTH = 240;
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 440;
@@ -146,6 +149,11 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState(false);
   const [starNudge, setStarNudge] = useState(false);
+  const [extensions, setExtensions] = useState<ExtInfo[]>([]);
+  const [openExtId, setOpenExtId] = useState<string | null>(null);
+  const [extBarOpen, setExtBarOpen] = useState(
+    () => localStorage.getItem("uwb.extBar") === "1",
+  );
   const closedUrls = useRef<string[]>([]);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
@@ -192,8 +200,15 @@ export default function App() {
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+  const openExtIdRef = useRef(openExtId);
+  openExtIdRef.current = openExtId;
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+
+  // The pinned extensions strip is a third chrome row; the content area (and
+  // every tab webview) starts below it when shown.
+  const showExtBar = extBarOpen;
+  const topInset = TOP_INSET + (showExtBar ? EXT_BAR_HEIGHT : 0);
 
   // Tell the native side where the content area starts. While the password
   // panel is open the page shrinks to leave it room, staying visible. Pushes
@@ -203,10 +218,10 @@ export default function App() {
     if (sidebarResizing) return;
     const left = sidebarOpen ? sidebarWidth : 0;
     const right = passOpen ? PASS_PANEL_RESERVE : 0;
-    ipc.setContentInsets(TOP_INSET, left, right).catch(() => {});
+    ipc.setContentInsets(topInset, left, right).catch(() => {});
     localStorage.setItem("uwb.sidebar", sidebarOpen ? "1" : "0");
     localStorage.setItem("uwb.sidebarWidth", String(sidebarWidth));
-  }, [sidebarOpen, passOpen, sidebarWidth, sidebarResizing]);
+  }, [sidebarOpen, passOpen, sidebarWidth, sidebarResizing, topInset]);
 
   // Resizing happens entirely in the chrome layer: the native tab webview is
   // hidden for the duration (it paints over the chrome and would swallow
@@ -235,7 +250,7 @@ export default function App() {
     if (tab?.kind !== "web") return;
     // Size the webview before showing it so it doesn't flash at the old width.
     ipc
-      .setContentInsets(TOP_INSET, width, passOpen ? PASS_PANEL_RESERVE : 0)
+      .setContentInsets(topInset, width, passOpen ? PASS_PANEL_RESERVE : 0)
       .catch(() => {})
       .then(() => ipc.activateTab(tab.id))
       .catch(() => {});
@@ -337,6 +352,37 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(""), 2400);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  // Load installed extensions once. Auto-open the bar the first time any exist
+  // (until the user makes their own choice, tracked in localStorage).
+  useEffect(() => {
+    ipc
+      .extList()
+      .then((list) => {
+        setExtensions(list);
+        if (list.length > 0 && localStorage.getItem("uwb.extBar") === null) {
+          setExtBarOpen(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Persist the bar preference; hiding it also dismisses any floating popup.
+  useEffect(() => {
+    localStorage.setItem("uwb.extBar", extBarOpen ? "1" : "0");
+    if (!extBarOpen && openExtIdRef.current) {
+      ipc.extClosePopup().catch(() => {});
+      setOpenExtId(null);
+    }
+  }, [extBarOpen]);
+
+  // The floating popup paints over the page and doesn't follow tab switches, so
+  // close it whenever the active tab changes.
+  useEffect(() => {
+    if (!openExtIdRef.current) return;
+    ipc.extClosePopup().catch(() => {});
+    setOpenExtId(null);
+  }, [activeId]);
 
   const reorderTabs = useCallback((from: number, to: number) => {
     setTabs((prev) => {
@@ -524,6 +570,18 @@ export default function App() {
   }, []);
   const handleNewTab = useCallback(() => openNewTab(), [openNewTab]);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), []);
+  const toggleExtensions = useCallback(() => setExtBarOpen((open) => !open), []);
+  const installExtensionFromStore = useCallback(async (id: string) => {
+    setToast("Installing extension…");
+    try {
+      const next = await ipc.extInstallFromStore(id);
+      setExtensions(next);
+      setExtBarOpen(true);
+      setToast("Extension installed — reload the page to activate it");
+    } catch (e) {
+      setToast(String(e));
+    }
+  }, []);
   const goDiscover = useCallback(() => goInternal(DISCOVER_URL), [goInternal]);
   const goUnreal = useCallback(() => goInternal(UNREAL_URL), [goInternal]);
   const goWorkbar = useCallback(() => goInternal(WORKBAR_URL), [goInternal]);
@@ -564,6 +622,13 @@ export default function App() {
           e.preventDefault();
           cycleTabs(e.shiftKey ? -1 : 1);
         }
+        return;
+      }
+      // Escape dismisses an open extension popup before anything else.
+      if (e.key === "Escape" && openExtIdRef.current) {
+        e.preventDefault();
+        ipc.extClosePopup().catch(() => {});
+        setOpenExtId(null);
         return;
       }
       const tab = currentTab();
@@ -644,7 +709,14 @@ export default function App() {
   const pinnedUrls = useMemo(() => collectPinnedUrls(widgets), [widgets]);
 
   return (
-    <div className="grid h-screen grid-cols-[minmax(0,1fr)] grid-rows-[44px_48px_1fr] overflow-hidden">
+    <div
+      className="grid h-screen grid-cols-[minmax(0,1fr)] overflow-hidden"
+      style={{
+        gridTemplateRows: showExtBar
+          ? `44px 48px ${EXT_BAR_HEIGHT}px minmax(0,1fr)`
+          : "44px 48px minmax(0,1fr)",
+      }}
+    >
       <TitleBar
         tabs={tabs}
         activeId={activeTab.id}
@@ -652,6 +724,8 @@ export default function App() {
         onClose={closeTab}
         onNewTab={handleNewTab}
         onReorder={reorderTabs}
+        onToggleExtensions={toggleExtensions}
+        extensionsActive={showExtBar}
       />
       <Toolbar
         tab={activeTab}
@@ -675,7 +749,17 @@ export default function App() {
         onTogglePin={onTogglePin}
         onSuggestionsOpen={setOmniboxOpen}
         onGithub={goGithub}
+        onInstallExtension={installExtensionFromStore}
       />
+      {showExtBar && (
+        <ExtensionBar
+          extensions={extensions}
+          openId={openExtId}
+          onOpenChange={setOpenExtId}
+          onExtensionsChange={setExtensions}
+          onToast={setToast}
+        />
+      )}
       <div className="flex min-h-0">
         {/* Kept mounted and width-animated so toggling doesn't hard-jump the
             layout; polling is gated by `active` so a collapsed sidebar is idle.

@@ -5,6 +5,7 @@ import {
   Check,
   Compass,
   Copy,
+  Download,
   Globe,
   Hammer,
   History as HistoryIcon,
@@ -30,7 +31,7 @@ import { Button } from "@/components/ui/button";
 import { usePolled } from "@/hooks/use-polled";
 import { fmtNumber } from "@/lib/format";
 import { ipc } from "@/lib/ipc";
-import { copyText, hostOf } from "@/lib/url";
+import { copyText, hostOf, storeExtensionId } from "@/lib/url";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -56,6 +57,8 @@ type Props = {
   onSuggestionsOpen: (open: boolean) => void;
   /** Opens the UWebBrowser repo — the toolbar's standing ask for a star. */
   onGithub: () => void;
+  /** Install the extension the current Web Store page is showing. */
+  onInstallExtension: (id: string) => Promise<void>;
 };
 
 type Row =
@@ -73,6 +76,8 @@ function ToolbarImpl(props: Props) {
   const [editing, setEditing] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const storeId = tab.kind === "web" ? storeExtensionId(tab.url) : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
   const optionId = (index: number) => `${listId}-opt-${index}`;
@@ -354,6 +359,27 @@ function ToolbarImpl(props: Props) {
           </div>
         )}
       </form>
+
+      {storeId && (
+        <Button
+          variant="ghost"
+          size="none"
+          disabled={installing}
+          className="h-[30px] flex-none gap-1.5 rounded-[7px] border border-ink-700 px-2.5 text-[11.5px] text-ink-200 hover:bg-ink-800 disabled:opacity-60 [&_svg]:size-3.5"
+          onClick={async () => {
+            setInstalling(true);
+            try {
+              await props.onInstallExtension(storeId);
+            } finally {
+              setInstalling(false);
+            }
+          }}
+          title="Install this extension into UWebBrowser"
+        >
+          <Download aria-hidden className={installing ? "animate-pulse" : undefined} />
+          {installing ? "Adding…" : "Add to UWebBrowser"}
+        </Button>
+      )}
 
       <GithubStars onClick={props.onGithub} />
 

@@ -68,7 +68,7 @@ fn check_scheme(url: &Url) -> Result<(), String> {
 /// Tab webviews live in their own browsing profile, separate from the chrome
 /// webview's default profile. Clearing site data must never touch the chrome
 /// UI's storage (config, pins, settings live in its localStorage).
-fn browsing_data_dir(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn browsing_data_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path()
         .app_local_data_dir()
         .ok()
@@ -167,6 +167,15 @@ pub async fn create_tab(
 
     if let Some(dir) = browsing_data_dir(&app) {
         builder = builder.data_directory(dir);
+    }
+
+    // Let installed Chrome extensions run in the page: content scripts inject
+    // and background logic sees this tab. Windows/WebView2 only; a no-op
+    // elsewhere. Shares the `browsing` profile with the extension host so the
+    // set of extensions is one and the same.
+    builder = builder.browser_extensions_enabled(true);
+    if let Some(dir) = crate::extensions::extensions_dir(&app) {
+        builder = builder.extensions_path(dir);
     }
 
     // Hide the currently visible tab; the new webview stacks on top.

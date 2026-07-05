@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Minus, Plus, Square, X } from "lucide-react";
+import { Copy, Minus, Plus, Puzzle, Square, X } from "lucide-react";
 import type { Tab } from "../App";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -31,6 +31,8 @@ type Props = {
   onClose: (id: string) => void;
   onNewTab: () => void;
   onReorder: (from: number, to: number) => void;
+  onToggleExtensions: () => void;
+  extensionsActive: boolean;
 };
 
 const windowControl =
@@ -45,7 +47,16 @@ const NEW_TAB_SPACE = 28 + TAB_GAP;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
-function TitleBarImpl({ tabs, activeId, onSelect, onClose, onNewTab, onReorder }: Props) {
+function TitleBarImpl({
+  tabs,
+  activeId,
+  onSelect,
+  onClose,
+  onNewTab,
+  onReorder,
+  onToggleExtensions,
+  extensionsActive,
+}: Props) {
   const appWindow = getCurrentWindow();
   const [maximized, setMaximized] = useState(false);
 
@@ -271,6 +282,23 @@ function TitleBarImpl({ tabs, activeId, onSelect, onClose, onNewTab, onReorder }
           title="New tab · Ctrl+T"
         >
           <Plus className="size-3" aria-hidden />
+        </Button>
+      </div>
+
+      <div className="flex flex-none items-center px-1.5" data-tauri-drag-region>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "size-7 rounded-lg [&_svg]:size-4",
+            extensionsActive && "bg-ink-800 text-ink-100",
+          )}
+          onClick={onToggleExtensions}
+          aria-label="Extensions"
+          aria-pressed={extensionsActive}
+          title="Extensions"
+        >
+          <Puzzle aria-hidden />
         </Button>
       </div>
 

@@ -110,12 +110,14 @@ impl ProtonProvider {
         }
         let mut rows = Vec::new();
         for share in self.vault_shares()? {
+            // `--flag=value` form: share ids are URL-safe base64 and can begin
+            // with `-`, which the CLI would otherwise parse as a flag.
+            let share_arg = format!("--share-id={share}");
             // A failed vault (e.g. permissions) shouldn't sink the whole list.
             if let Ok(out) = self.run(&[
                 "item",
                 "list",
-                "--share-id",
-                &share,
+                &share_arg,
                 "--show-secrets",
                 "--output",
                 "json",
@@ -204,10 +206,12 @@ impl CredentialProvider for ProtonProvider {
 
     fn secret(&self, id: &str) -> Result<CredentialSecret, String> {
         let (share, item) = id.split_once(':').ok_or_else(|| "bad item id".to_string())?;
+        // `--flag=value` form: these ids are URL-safe base64 and can begin
+        // with `-`, which the CLI would otherwise parse as a flag.
+        let share_arg = format!("--share-id={share}");
+        let item_arg = format!("--item-id={item}");
         let out = self
-            .run(&[
-                "item", "view", "--share-id", share, "--item-id", item, "--output", "json",
-            ])
+            .run(&["item", "view", &share_arg, &item_arg, "--output", "json"])
             .map_err(|e| e.message())?;
         let value: Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
         // item view nests as: item.content.content.Login.{ email, username,

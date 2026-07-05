@@ -30,6 +30,23 @@ export function tabLabelFor(raw: string): string {
   }
 }
 
+/** The Chrome Web Store extension id for a detail-page URL, or null. Works for
+ *  both the classic (`chrome.google.com/webstore/detail/…`) and current
+ *  (`chromewebstore.google.com/detail/…`) stores by pulling the 32-char id
+ *  segment out of the path, so it survives the store redesign. */
+export function storeExtensionId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const store =
+      u.hostname === "chromewebstore.google.com" || u.hostname === "chrome.google.com";
+    if (!store) return null;
+    const seg = u.pathname.split("/").find((s) => /^[a-p]{32}$/.test(s));
+    return seg ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Google's favicon service for a site, or `""` if the URL has no host.
  *  Callers render a neutral glyph on `onError` — the service can be blocked
  *  offline, and it reveals the host to Google. */

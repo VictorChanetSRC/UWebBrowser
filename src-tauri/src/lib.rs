@@ -1,5 +1,6 @@
 mod default_browser;
 pub mod discovery;
+mod extensions;
 mod github;
 mod history;
 mod http;
@@ -45,6 +46,11 @@ pub fn run() {
             tabs::tab_eval,
             tabs::set_content_insets,
             tabs::clear_browsing_data,
+            extensions::ext_list,
+            extensions::ext_import,
+            extensions::ext_install_from_store,
+            extensions::ext_open_popup,
+            extensions::ext_close_popup,
             terminal::term_create,
             terminal::term_write,
             terminal::term_resize,
@@ -137,6 +143,11 @@ pub fn run() {
                     tabs::apply_bounds_to_all(&app_handle);
                 }
             });
+
+            // Hidden webview that anchors the extension profile so the installed
+            // set can be listed with no tab open, and so extensions load at
+            // launch (they persist in the browsing profile across sessions).
+            extensions::spawn_host(app.handle());
 
             Ok(())
         })
