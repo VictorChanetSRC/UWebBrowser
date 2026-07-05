@@ -372,6 +372,7 @@ pub async fn ext_import(app: AppHandle, source: String) -> Result<Vec<ExtInfo>, 
         std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
     }
     copy_dir_all(&source, &dest).map_err(|e| e.to_string())?;
+    patch_permission_gates(&dest);
 
     #[cfg(windows)]
     imp::add_extension(&app, dest).await;
@@ -416,6 +417,7 @@ pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<Ex
         std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
     }
     extract_zip(zip, &dest)?;
+    patch_permission_gates(&dest);
 
     #[cfg(windows)]
     imp::add_extension(&app, dest).await;
@@ -491,6 +493,9 @@ pub fn spawn_host(app: &AppHandle) {
     let Some(window) = app.get_window("main") else {
         return;
     };
+    // Heal extensions installed before the permission-gate shim existed, before
+    // WebView2 re-reads them from disk when this host webview creates the profile.
+    patch_all_installed(app);
     let Ok(blank) = Url::parse("about:blank") else {
         return;
     };
@@ -514,6 +519,72 @@ pub fn spawn_host(app: &AppHandle) {
 }
 
 // --- helpers ----------------------------------------------------------------
+
+/// WebView2 quirk: some extensions gate their features on
+/// `chrome.permissions.contains({origins:[…]})`, which WebView2 wrongly reports
+/// as `false` for a manifest's *required* host permissions — even though it has
+/// granted them and content scripts do run. Proton Pass (and most password
+/// managers) then self-disable with a "missing permissions" banner. Rewrite that
+/// one check to resolve `true`; the page access it's asserting genuinely exists.
+///
+/// Applied to unpacked extensions on this machine only. Also strips `_metadata`
+/// so an edited unpacked extension carries no stale store integrity hashes.
+fn patch_permission_gates(dir: &std::path::Path) {
+    let _ = std::fs::remove_dir_all(dir.join("_metadata"));
+    patch_js_tree(dir);
+}
+
+fn patch_js_tree(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            patch_js_tree(&path);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("js") {
+            patch_js_file(&path);
+        }
+    }
+}
+
+fn patch_js_file(path: &std::path::Path) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    // Cheap guard so we don't regex-scan every crypto/worker chunk.
+    if !text.contains("permissions.contains({origins:") {
+        return;
+    }
+    // Consume an optional receiver (`rp.`, `chrome.`, `globalThis.chrome.` → the
+    // trailing `chrome.`) so the whole call expression is replaced cleanly.
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"(?:[\w$]+\.)?permissions\.contains\(\{origins:[^}]*\}\)").unwrap()
+    });
+    let patched = re.replace_all(&text, "Promise.resolve(!0)");
+    if patched != text {
+        let _ = std::fs::write(path, patched.as_ref());
+    }
+}
+
+/// Re-apply [`patch_permission_gates`] to every installed extension. Unpacked
+/// extensions are re-read from disk each launch, so running this before the
+/// host webview loads them heals extensions installed before the shim existed.
+pub fn patch_all_installed(app: &AppHandle) {
+    let Some(dir) = extensions_dir(app) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            patch_permission_gates(&path);
+        }
+    }
+}
 
 /// A `.crx` is a signed header followed by a plain ZIP. Return the inner ZIP
 /// slice, handling both CRX2 (legacy) and CRX3 (current) layouts.

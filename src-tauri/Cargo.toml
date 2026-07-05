@@ -40,6 +40,8 @@ getrandom = "0.2"
 base64 = "0.22"
 # Unpack .crx downloads (a ZIP behind a signed header) for Web Store installs.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Rewrite the one extension self-check WebView2 misreports (see extensions.rs).
+regex = "1"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
