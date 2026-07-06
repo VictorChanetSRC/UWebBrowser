@@ -30,6 +30,22 @@ export function tabLabelFor(raw: string): string {
   }
 }
 
+/** Whether a URL is safe to hand to the tab engine: only real navigable
+ *  schemes plus our internal `uwb:`. Mirrors the backend's `check_scheme` so
+ *  javascript:/data:/blob: links (e.g. from a feed) are rejected in the UI too
+ *  — defence in depth, and it lets us tell the user instead of the backend
+ *  silently dropping the request. A bare host / typed fragment with no scheme
+ *  is allowed through; the omnibox normalizes those before this is reached. */
+export function isNavigableUrl(raw: string): boolean {
+  let scheme: string;
+  try {
+    scheme = new URL(raw).protocol.replace(/:$/, "").toLowerCase();
+  } catch {
+    return true;
+  }
+  return scheme === "http" || scheme === "https" || scheme === "file" || scheme === "uwb";
+}
+
 /** The Chrome Web Store extension id for a detail-page URL, or null. Works for
  *  both the classic (`chrome.google.com/webstore/detail/…`) and current
  *  (`chromewebstore.google.com/detail/…`) stores by pulling the 32-char id

@@ -5,7 +5,6 @@ mod github;
 mod history;
 mod http;
 mod news;
-mod passwords;
 mod stats;
 mod sysmon;
 mod tabs;
@@ -17,7 +16,7 @@ use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
-    let mut builder = passwords::register(tauri::Builder::default());
+    let mut builder = tauri::Builder::default();
     #[cfg(desktop)]
     {
         // When we're the default browser, opening a link spawns a second
@@ -81,30 +80,12 @@ pub fn run() {
             history::clear_build_history,
             history::launch_packaged,
             history::reveal_in_explorer,
-            sysmon::system_stats,
-            passwords::pass_status,
-            passwords::pass_providers,
-            passwords::pass_select_provider,
-            passwords::pass_setup,
-            passwords::pass_install_cli,
-            passwords::pass_unlock,
-            passwords::pass_lock,
-            passwords::pass_list,
-            passwords::pass_matches,
-            passwords::pass_save,
-            passwords::pass_reveal,
-            passwords::pass_update,
-            passwords::pass_delete,
-            passwords::pass_fill,
-            passwords::pass_commit_capture,
-            passwords::pass_dismiss_capture,
-            passwords::pass_generate
+            sysmon::system_stats
         ])
         .setup(|app| {
             // Chrome-style: refresh the default-browser registration on every
             // launch so the registry always points at the current exe.
             default_browser::register_as_browser();
-            passwords::init(app.handle()).map_err(|e| format!("password manager: {e}"))?;
             let width = 1360.0;
             let height = 860.0;
 

@@ -15,21 +15,19 @@ import { Settings } from "./components/Settings";
 import { History } from "./components/History";
 import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
-import { PassPanel } from "./components/PassPanel";
-import { PassSaveBanner, type Capture } from "./components/PassSaveBanner";
 import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
 import { GITHUB_REPO_URL } from "./lib/github";
 import { TerminalView } from "./components/TerminalView";
 import { pruneTerminals } from "./lib/terminal";
-import { initProvider, isNeverHost, pass } from "./lib/passwords";
 import { ipc } from "./lib/ipc";
 import { loadConfig, saveConfig, type UwbConfig } from "./lib/config";
 import { loadSession, saveSession } from "./lib/session";
 import type { LinkItem } from "./lib/engines";
 import { recordVisit, updateTitle } from "./lib/history";
-import { hostOf, tabLabelFor } from "./lib/url";
+import { hostOf, tabLabelFor, isNavigableUrl } from "./lib/url";
 import {
   engineFor,
   loadSettings,
@@ -69,9 +67,6 @@ const SIDEBAR_MAX_WIDTH = 440;
 
 const clampSidebarWidth = (width: number) =>
   Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
-// Panel is 384px wide at right-2 (8px); reserve it plus an 8px gap so the
-// page shrinks beside the password panel instead of being hidden behind it.
-const PASS_PANEL_RESERVE = 400;
 const DEFAULT_PROMPT_SNOOZE_KEY = "uwb.defaultBrowser.snoozeUntil";
 const DEFAULT_PROMPT_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
 const DEFAULT_PROMPT_DELAY_MS = 2500;
@@ -143,8 +138,6 @@ export default function App() {
   // While the omnibox suggestion list is showing, the native tab webview is
   // hidden — it would otherwise paint over the dropdown.
   const [omniboxOpen, setOmniboxOpen] = useState(false);
-  const [passOpen, setPassOpen] = useState(false);
-  const [capture, setCapture] = useState<Capture | null>(null);
   const [toast, setToast] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState(false);
   const [extensions, setExtensions] = useState<ExtInfo[]>([]);
@@ -208,18 +201,16 @@ export default function App() {
   const showExtBar = extBarOpen;
   const topInset = TOP_INSET + (showExtBar ? EXT_BAR_HEIGHT : 0);
 
-  // Tell the native side where the content area starts. While the password
-  // panel is open the page shrinks to leave it room, staying visible. Pushes
-  // are skipped mid-drag (the webview is hidden then); the final width lands
-  // here once the drag ends.
+  // Tell the native side where the content area starts. Pushes are skipped
+  // mid-drag (the webview is hidden then); the final width lands here once the
+  // drag ends.
   useEffect(() => {
     if (sidebarResizing) return;
     const left = sidebarOpen ? sidebarWidth : 0;
-    const right = passOpen ? PASS_PANEL_RESERVE : 0;
-    ipc.setContentInsets(topInset, left, right).catch(() => {});
+    ipc.setContentInsets(topInset, left, 0).catch(() => {});
     localStorage.setItem("uwb.sidebar", sidebarOpen ? "1" : "0");
     localStorage.setItem("uwb.sidebarWidth", String(sidebarWidth));
-  }, [sidebarOpen, passOpen, sidebarWidth, sidebarResizing, topInset]);
+  }, [sidebarOpen, sidebarWidth, sidebarResizing, topInset]);
 
   // Resizing happens entirely in the chrome layer: the native tab webview is
   // hidden for the duration (it paints over the chrome and would swallow
@@ -248,7 +239,7 @@ export default function App() {
     if (tab?.kind !== "web") return;
     // Size the webview before showing it so it doesn't flash at the old width.
     ipc
-      .setContentInsets(topInset, width, passOpen ? PASS_PANEL_RESERVE : 0)
+      .setContentInsets(topInset, width, 0)
       .catch(() => {})
       .then(() => ipc.activateTab(tab.id))
       .catch(() => {});
@@ -258,6 +249,12 @@ export default function App() {
     (url?: string) => {
       const tab = homeTab(url?.startsWith("uwb:") ? url : undefined);
       if (url && !url.startsWith("uwb:")) {
+        // Reject javascript:/data:/blob: and other non-navigable links (the
+        // backend would refuse them too, but silently) with a bit of feedback.
+        if (!isNavigableUrl(url)) {
+          setToast("That link can’t be opened here.");
+          return;
+        }
         tab.kind = "web";
         tab.url = url;
         tab.title = tabLabelFor(url);
@@ -332,39 +329,12 @@ export default function App() {
   }, []);
 
   // The native tab webview paints over any chrome overlay, so hide it while
-  // the omnibox suggestions are showing. (The password panel instead reserves
-  // a right inset above, so the page stays visible beside it.)
+  // the omnibox suggestions are showing.
   useEffect(() => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
     if (tab?.kind !== "web") return;
     ipc.activateTab(omniboxOpen ? null : tab.id).catch(() => {});
   }, [omniboxOpen]);
-
-  // Sync the native backend to the user's saved choice on boot, then listen for
-  // events from the injected content script (inline fill click, save prompt).
-  useEffect(() => {
-    initProvider();
-    const unlisten = pass.onBridge((event) => {
-      if (event.kind === "fill") {
-        setPassOpen(true);
-      } else if (event.kind === "capture") {
-        // Honor "never for this site": drop the pending capture silently.
-        if (isNeverHost(event.host)) {
-          pass.dismissCapture(event.tabId).catch(() => {});
-          return;
-        }
-        setCapture({
-          tabId: event.tabId,
-          host: event.host,
-          username: event.username,
-          mode: event.mode === "update" ? "update" : "new",
-        });
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -586,7 +556,6 @@ export default function App() {
   const goSettings = useCallback(() => goInternal(SETTINGS_URL), [goInternal]);
   const goHistory = useCallback(() => goInternal(HISTORY_URL), [goInternal]);
   const goHome = useCallback(() => goInternal(HOME_URL), [goInternal]);
-  const openPasswords = useCallback(() => setPassOpen(true), []);
   const goGithub = useCallback(() => openNewTab(GITHUB_REPO_URL), [openNewTab]);
   const onBack = useCallback(() => withWebTab((id) => ipc.goBack(id)), [withWebTab]);
   const onForward = useCallback(() => withWebTab((id) => ipc.goForward(id)), [withWebTab]);
@@ -659,11 +628,6 @@ export default function App() {
         return;
       }
       const key = e.key.toLowerCase();
-      if (key === "l" && e.shiftKey) {
-        e.preventDefault();
-        setPassOpen((open) => !open);
-        return;
-      }
       if (key === "t" && e.shiftKey) {
         e.preventDefault();
         const url = closedUrls.current.pop();
@@ -742,7 +706,6 @@ export default function App() {
         onTerminal={goTerminal}
         onHistory={goHistory}
         onSettings={goSettings}
-        onPasswords={openPasswords}
         onTogglePin={onTogglePin}
         onSuggestionsOpen={setOmniboxOpen}
         onGithub={goGithub}
@@ -806,6 +769,10 @@ export default function App() {
           )}
         </div>
         <div className="relative min-w-0 flex-1 bg-background">
+          {/* Isolate the internal-page render: a throw in a widget or hub
+              shows a local fallback instead of blanking the whole browser.
+              Keyed by url so navigating to another page clears a prior error. */}
+          <ErrorBoundary key={activeTab.url}>
           {activeTab.kind === "home" ? (
             activeTab.url === DISCOVER_URL ? (
               <Discover
@@ -849,6 +816,7 @@ export default function App() {
           ) : (
             <div className="h-full" />
           )}
+          </ErrorBoundary>
 
           {/* Terminal tabs stay mounted while hidden so their shell keeps
               running and scrollback survives tab switches. */}
@@ -865,29 +833,6 @@ export default function App() {
             ))}
 
           {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
-
-          {capture && (
-            <PassSaveBanner
-              capture={capture}
-              onDone={(saved) => {
-                setCapture(null);
-                if (saved)
-                  setToast(capture.mode === "update" ? "Password updated" : "Saved to your vault");
-              }}
-            />
-          )}
-
-          <PassPanel
-            open={passOpen}
-            onClose={() => setPassOpen(false)}
-            activeUrl={activeTab.kind === "web" ? activeTab.url : ""}
-            activeTabId={activeTab.kind === "web" ? activeTab.id : null}
-            onToast={setToast}
-            onOpenUrl={(url) => {
-              setPassOpen(false);
-              openNewTab(url);
-            }}
-          />
 
           {/* Always-mounted live region so the toast is announced when it
               appears; the inner node carries the entrance animation. */}

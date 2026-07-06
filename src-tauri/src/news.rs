@@ -24,17 +24,16 @@ pub struct FeedItem {
 /// Fetch and parse an RSS 2.0 or Atom feed into a flat item list.
 #[tauri::command]
 pub async fn fetch_feed(url: String) -> Result<Vec<FeedItem>, String> {
+    http::check_public_url(&url)?;
     let client = http::shared()?;
-    let body = client
+    let resp = client
         .get(&url)
         .send()
         .await
         .map_err(err)?
         .error_for_status()
-        .map_err(err)?
-        .text()
-        .await
         .map_err(err)?;
+    let body = http::text_capped(resp).await?;
     Ok(parse_feed(&body))
 }
 

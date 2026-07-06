@@ -56,7 +56,7 @@ fn launch_url(arg: &str, cwd: Option<&std::path::Path>) -> Option<String> {
 /// that arrives as an `open-url` event through the single-instance callback.
 #[tauri::command]
 pub fn take_startup_urls(state: tauri::State<'_, StartupUrls>) -> Vec<String> {
-    std::mem::take(&mut *state.0.lock().unwrap())
+    std::mem::take(&mut *state.0.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// A second launch (the user opened a link or file somewhere while we're

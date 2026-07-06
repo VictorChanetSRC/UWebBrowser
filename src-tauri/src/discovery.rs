@@ -93,15 +93,13 @@ pub async fn check_platform(platform: String, query: String) -> Result<PlatformH
 }
 
 async fn steam(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let v: Value = client
+    let resp = client
         .get("https://store.steampowered.com/api/storesearch/")
         .query(&[("term", q), ("l", "english"), ("cc", "US")])
         .send()
         .await
-        .map_err(err)?
-        .json()
-        .await
         .map_err(err)?;
+    let v: Value = http::json_capped(resp).await?;
 
     let candidates = v["items"]
         .as_array()
@@ -125,15 +123,13 @@ async fn epic(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> 
         "query": "query($keywords: String!) { Catalog { searchStore(keywords: $keywords, category: \"games/edition/base\", count: 8) { elements { title urlSlug productSlug catalogNs { mappings(pageType: \"productHome\") { pageSlug } } } } } }",
         "variables": { "keywords": q }
     });
-    let v: Value = client
+    let resp = client
         .post("https://store.epicgames.com/graphql")
         .json(&body)
         .send()
         .await
-        .map_err(err)?
-        .json()
-        .await
         .map_err(err)?;
+    let v: Value = http::json_capped(resp).await?;
 
     let candidates = v["data"]["Catalog"]["searchStore"]["elements"]
         .as_array()
@@ -158,7 +154,7 @@ async fn epic(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> 
 }
 
 async fn xbox(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let v: Value = client
+    let resp = client
         .get("https://displaycatalog.mp.microsoft.com/v7.0/productFamilies/autosuggest")
         .query(&[
             ("market", "US"),
@@ -168,10 +164,8 @@ async fn xbox(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> 
         ])
         .send()
         .await
-        .map_err(err)?
-        .json()
-        .await
         .map_err(err)?;
+    let v: Value = http::json_capped(resp).await?;
 
     let mut nodes = Vec::new();
     walk(&v, &mut nodes, &|n| {
@@ -194,7 +188,7 @@ async fn xbox(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> 
 /// The PSN store search page server-renders its Apollo cache; full games
 /// appear as Product nodes with an id and classification.
 async fn playstation(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let html = client
+    let resp = client
         .get(format!(
             "https://store.playstation.com/en-us/search/{}",
             urlencode(q)
@@ -202,10 +196,8 @@ async fn playstation(client: &reqwest::Client, q: &str) -> Result<PlatformHit, S
         .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         .send()
         .await
-        .map_err(err)?
-        .text()
-        .await
         .map_err(err)?;
+    let html = http::text_capped(resp).await?;
 
     let state = html
         .split("__NEXT_DATA__")
@@ -237,7 +229,7 @@ async fn playstation(client: &reqwest::Client, q: &str) -> Result<PlatformHit, S
 }
 
 async fn nintendo(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let v: Value = client
+    let resp = client
         .get("https://search.nintendo-europe.com/en/select")
         .query(&[
             ("q", q),
@@ -248,10 +240,8 @@ async fn nintendo(client: &reqwest::Client, q: &str) -> Result<PlatformHit, Stri
         ])
         .send()
         .await
-        .map_err(err)?
-        .json()
-        .await
         .map_err(err)?;
+    let v: Value = http::json_capped(resp).await?;
 
     let candidates = v["response"]["docs"]
         .as_array()
@@ -269,15 +259,13 @@ async fn nintendo(client: &reqwest::Client, q: &str) -> Result<PlatformHit, Stri
 }
 
 async fn appstore(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let v: Value = client
+    let resp = client
         .get("https://itunes.apple.com/search")
         .query(&[("term", q), ("entity", "software"), ("limit", "8")])
         .send()
         .await
-        .map_err(err)?
-        .json()
-        .await
         .map_err(err)?;
+    let v: Value = http::json_capped(resp).await?;
 
     let candidates = v["results"]
         .as_array()
@@ -297,16 +285,13 @@ async fn appstore(client: &reqwest::Client, q: &str) -> Result<PlatformHit, Stri
 /// Google Play has no public search API; scan the search page for a details
 /// link with the game's name rendered nearby. Best effort by design.
 async fn googleplay(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let html = client
+    let resp = client
         .get("https://play.google.com/store/search")
         .query(&[("q", q), ("c", "apps"), ("hl", "en"), ("gl", "US")])
         .send()
         .await
-        .map_err(err)?
-        .text()
-        .await
-        .map_err(err)?
-        .to_lowercase();
+        .map_err(err)?;
+    let html = http::text_capped(resp).await?.to_lowercase();
 
     let needle = q.to_lowercase();
     let marker = "/store/apps/details?id=";
@@ -338,15 +323,13 @@ async fn googleplay(client: &reqwest::Client, q: &str) -> Result<PlatformHit, St
 /// itch.io search is HTML only; game cards carry `game_link` anchors, the
 /// title one has the name as plain text.
 async fn itch(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    let html = client
+    let resp = client
         .get("https://itch.io/search")
         .query(&[("q", q)])
         .send()
         .await
-        .map_err(err)?
-        .text()
-        .await
         .map_err(err)?;
+    let html = http::text_capped(resp).await?;
 
     let mut candidates = Vec::new();
     let mut pos = 0;
@@ -417,7 +400,7 @@ async fn twitch_gql(
     if !response.status().is_success() {
         return Err(format!("twitch gql returned {}", response.status()));
     }
-    let v: Value = response.json().await.map_err(err)?;
+    let v: Value = http::json_capped(response).await?;
 
     let candidates = v["data"]["searchCategories"]["edges"]
         .as_array()
@@ -437,15 +420,13 @@ async fn twitch_gql(
 }
 
 async fn twitch_client_id(client: &reqwest::Client) -> Result<String, String> {
-    let html = client
+    let resp = client
         .get("https://www.twitch.tv/")
         .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         .send()
         .await
-        .map_err(err)?
-        .text()
-        .await
         .map_err(err)?;
+    let html = http::text_capped(resp).await?;
     ["clientId=\"", "clientId:\"", "clientID=\""]
         .iter()
         .find_map(|marker| {

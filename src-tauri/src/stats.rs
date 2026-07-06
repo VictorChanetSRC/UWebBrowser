@@ -62,12 +62,7 @@ pub async fn reddit_search(query: String) -> Result<Value, String> {
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err("Reddit is rate limiting".into());
     }
-    let body = response
-        .error_for_status()
-        .map_err(err)?
-        .text()
-        .await
-        .map_err(err)?;
+    let body = http::text_capped(response.error_for_status().map_err(err)?).await?;
 
     let posts: Vec<Value> = crate::news::parse_feed(&body)
         .into_iter()

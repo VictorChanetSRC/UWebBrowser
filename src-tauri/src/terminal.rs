@@ -67,7 +67,7 @@ pub async fn term_create(
     rows: u16,
 ) -> Result<(), String> {
     // A restart reuses the tab id; make sure the old shell is gone first.
-    if let Some(mut old) = state.sessions.lock().unwrap().remove(&id) {
+    if let Some(mut old) = state.sessions.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
         let _ = old.killer.kill();
     }
 
@@ -94,7 +94,7 @@ pub async fn term_create(
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
 
     let gen = NEXT_GEN.fetch_add(1, Ordering::Relaxed);
-    state.sessions.lock().unwrap().insert(
+    state.sessions.lock().unwrap_or_else(|e| e.into_inner()).insert(
         id.clone(),
         Session {
             gen,
@@ -148,7 +148,7 @@ pub async fn term_create(
     std::thread::spawn(move || {
         let code = child.wait().ok().map(|status| status.exit_code());
         let state = app_exit.state::<TermState>();
-        let mut sessions = state.sessions.lock().unwrap();
+        let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if sessions.get(&id).map(|s| s.gen) == Some(gen) {
             sessions.remove(&id);
             drop(sessions);
@@ -165,7 +165,7 @@ pub async fn term_write(
     id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
+    let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
     let session = sessions.get_mut(&id).ok_or("no terminal session")?;
     session
         .writer
@@ -180,7 +180,7 @@ pub async fn term_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
+    let sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
     let session = sessions.get(&id).ok_or("no terminal session")?;
     session
         .master
@@ -195,7 +195,7 @@ pub async fn term_resize(
 
 #[tauri::command]
 pub async fn term_close(state: tauri::State<'_, TermState>, id: String) -> Result<(), String> {
-    if let Some(mut session) = state.sessions.lock().unwrap().remove(&id) {
+    if let Some(mut session) = state.sessions.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
         let _ = session.killer.kill();
     }
     Ok(())

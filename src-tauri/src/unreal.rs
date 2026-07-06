@@ -97,7 +97,7 @@ fn pump<R: std::io::Read>(
     for line in BufReader::new(reader).lines().map_while(Result::ok) {
         let stage = if detect_stage { stage_of(&line) } else { None };
         // One lock per line (was two): record the stage marker and the line.
-        if let Some(rec) = recorder.lock().unwrap().as_mut() {
+        if let Some(rec) = recorder.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             if let Some(stage) = stage {
                 rec.stage(stage);
             }
@@ -320,7 +320,24 @@ pub struct BuildRequest {
     pub archive_dir: Option<String>,
 }
 
+/// `config`/`platform` are interpolated into a `.bat` invocation, which runs
+/// through `cmd.exe`. A value carrying shell metacharacters is a
+/// command-injection vector (BatBadBut / CVE-2024-24576), so we require the
+/// simple alphanumeric identifiers Unreal actually uses and reject anything
+/// else before it reaches the command line. (`action` is already matched
+/// against a fixed set below; the paths are validated by the toolchain via the
+/// `is_file` checks.)
+fn valid_build_token(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 fn build_command(req: &BuildRequest) -> Result<(PathBuf, Vec<String>, Option<String>), String> {
+    if !valid_build_token(&req.config) {
+        return Err(format!("invalid build configuration: {}", req.config));
+    }
+    if !valid_build_token(&req.platform) {
+        return Err(format!("invalid target platform: {}", req.platform));
+    }
     let engine = PathBuf::from(&req.engine_path);
     let batch = engine.join("Engine/Build/BatchFiles");
     let uproject = PathBuf::from(&req.uproject);
@@ -431,7 +448,7 @@ pub async fn start_build(
     let stderr = child.stderr.take().ok_or("no stderr")?;
 
     let job_id = req.job_id.clone();
-    state.jobs.lock().unwrap().insert(job_id.clone(), child.id());
+    state.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(job_id.clone(), child.id());
 
     // Record the run to disk (history, ETA learning); best-effort.
     let project_name = PathBuf::from(&req.uproject)
@@ -472,10 +489,10 @@ pub async fn start_build(
             .and_then(|status| status.code())
             .unwrap_or(-1);
         let state = app.state::<BuildState>();
-        state.jobs.lock().unwrap().remove(&job_id);
-        let cancelled = state.cancelled.lock().unwrap().remove(&job_id);
+        state.jobs.lock().unwrap_or_else(|e| e.into_inner()).remove(&job_id);
+        let cancelled = state.cancelled.lock().unwrap_or_else(|e| e.into_inner()).remove(&job_id);
         // Summary written before "done" so a refresh triggered by it sees the record.
-        if let Some(rec) = recorder.lock().unwrap().take() {
+        if let Some(rec) = recorder.lock().unwrap_or_else(|e| e.into_inner()).take() {
             rec.finish(code, cancelled);
         }
         emit_build_event(&app, &job_id, "done", code.to_string());
@@ -493,25 +510,31 @@ pub async fn cancel_build(
     let pid = state
         .jobs
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&job_id)
         .copied()
         .ok_or("job not running")?;
-    state.cancelled.lock().unwrap().insert(job_id.clone());
-    #[cfg(windows)]
-    {
-        let mut cmd = Command::new("taskkill");
-        cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-        cmd.status().map_err(|e| e.to_string())?;
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .status()
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    state.cancelled.lock().unwrap_or_else(|e| e.into_inner()).insert(job_id.clone());
+    // taskkill /T /F blocks until the whole process tree is gone; keep it off
+    // the async worker so other commands aren't stalled meanwhile.
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let mut cmd = Command::new("taskkill");
+            cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+            cmd.status().map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(windows))]
+        {
+            Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

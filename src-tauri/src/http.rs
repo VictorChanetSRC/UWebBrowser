@@ -2,6 +2,7 @@
 //! the connection pool (and TLS sessions) survive across commands instead of
 //! being torn down after every call.
 
+use std::net::IpAddr;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -43,12 +44,78 @@ pub fn shared() -> Result<&'static reqwest::Client, String> {
     Ok(CLIENT.get_or_init(|| built))
 }
 
+/// Largest response body we'll buffer from any endpoint. The 12s timeout above
+/// bounds *time*, not *bytes*, so without this a hostile or buggy server could
+/// stream unbounded data and exhaust memory. 16 MiB comfortably covers every
+/// feed / JSON / CRX response we consume.
+pub const MAX_BODY: usize = 16 * 1024 * 1024;
+
+/// Read a response body with a hard byte cap. Streams chunk-by-chunk (via
+/// `Response::chunk`, no extra reqwest features) so we never buffer more than
+/// `MAX_BODY`, and rejects early when the server declares an oversize length.
+pub async fn body_capped(mut resp: reqwest::Response) -> Result<Vec<u8>, String> {
+    if resp.content_length().map_or(false, |len| len as usize > MAX_BODY) {
+        return Err("response too large".to_string());
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(err)? {
+        if buf.len() + chunk.len() > MAX_BODY {
+            return Err("response too large".to_string());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+/// Size-capped `text()`.
+pub async fn text_capped(resp: reqwest::Response) -> Result<String, String> {
+    let bytes = body_capped(resp).await?;
+    String::from_utf8(bytes).map_err(err)
+}
+
+/// Size-capped `json()`.
+pub async fn json_capped<T: serde::de::DeserializeOwned>(
+    resp: reqwest::Response,
+) -> Result<T, String> {
+    let bytes = body_capped(resp).await?;
+    serde_json::from_slice(&bytes).map_err(err)
+}
+
+/// Guard a caller-supplied URL before fetching it: only http(s), and never a
+/// loopback / private / link-local host. `fetch_feed` fetches arbitrary URLs
+/// from the user's feed list, so this keeps it from being aimed at internal
+/// services (SSRF). Best-effort — it blocks literal-IP and localhost targets,
+/// not hostnames that resolve into private space.
+pub fn check_public_url(raw: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(raw).map_err(|_| "invalid URL".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("unsupported URL scheme: {other}")),
+    }
+    let host = parsed.host_str().ok_or("URL has no host")?;
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower.ends_with(".localhost") {
+        return Err("refusing to fetch a loopback host".to_string());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        let blocked = match ip {
+            IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast()
+            }
+            IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        };
+        if blocked {
+            return Err("refusing to fetch a private address".to_string());
+        }
+    }
+    Ok(())
+}
+
 pub async fn get_json(c: &reqwest::Client, url: &str) -> Result<serde_json::Value, String> {
-    c.get(url)
-        .send()
-        .await
-        .map_err(err)?
-        .json()
-        .await
-        .map_err(err)
+    let resp = c.get(url).send().await.map_err(err)?;
+    json_capped(resp).await
 }

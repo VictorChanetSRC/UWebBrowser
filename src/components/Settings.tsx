@@ -7,12 +7,6 @@ import {
   type BrowserSettings,
   type SearchEngineKey,
 } from "../lib/settings";
-import {
-  pass,
-  setProvider,
-  getProviderId,
-  type ProviderReport,
-} from "../lib/passwords";
 import { GITHUB_REPO_URL } from "../lib/github";
 import { fmtNumber } from "../lib/format";
 import { FeedbackDialog } from "./FeedbackDialog";
@@ -43,27 +37,18 @@ export function Settings({
   const [clearError, setClearError] = useState("");
   const [historyCleared, setHistoryCleared] = useState(false);
   const [pinsReset, setPinsReset] = useState(false);
-  const [providers, setProviders] = useState<ProviderReport[]>([]);
-  const [activeProvider, setActiveProvider] = useState(getProviderId);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [stars, setStars] = useState<number | null>(null);
   const resetTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
-    pass.providers().then(setProviders).catch(() => {});
     ipc
       .githubRepoStats()
       .then((repoStats) => setStars(repoStats.stars))
       .catch(() => {});
     return () => window.clearTimeout(resetTimer.current);
   }, []);
-
-  const switchProvider = async (id: string) => {
-    setActiveProvider(id);
-    await setProvider(id).catch(() => {});
-    pass.providers().then(setProviders).catch(() => {});
-  };
 
   const settle = (fn: () => void, ms = 2600) => {
     window.clearTimeout(resetTimer.current);
@@ -179,29 +164,6 @@ export function Settings({
               </Button>
             </Row>
           </div>
-        </SettingsSection>
-
-        <SettingsSection label="Passwords">
-          <Row
-            title="Where passwords are stored"
-            description="Fill and save logins as you browse. Open the vault anytime with Ctrl+Shift+L."
-          >
-            <div className="flex flex-wrap justify-end gap-2">
-              {providers.map((provider) => (
-                <Button
-                  key={provider.id}
-                  variant="chip"
-                  size="chip"
-                  aria-pressed={activeProvider === provider.id}
-                  disabled={provider.status.state === "unavailable"}
-                  onClick={() => switchProvider(provider.id)}
-                  title={provider.status.detail}
-                >
-                  {provider.capabilities.label}
-                </Button>
-              ))}
-            </div>
-          </Row>
         </SettingsSection>
 
         <SettingsSection label="Work bar">

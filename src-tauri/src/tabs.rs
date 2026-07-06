@@ -27,8 +27,8 @@ pub struct TabsState {
 pub struct Insets {
     pub top: f64,
     pub left: f64,
-    /// Space reserved on the right for chrome overlays (the password panel);
-    /// keeps the page visible beside them instead of hiding the webview.
+    /// Space reserved on the right for chrome overlays; keeps the page visible
+    /// beside them instead of hiding the webview.
     pub right: f64,
 }
 
@@ -59,19 +59,17 @@ fn emit_tab_event(app: &AppHandle, id: &str, kind: &str, value: String) {
 /// tab id (or the popup label) — the chrome UI ignores it for `new-tab` events,
 /// but passing it keeps the event shape uniform.
 pub(crate) fn open_in_new_tab(app: &AppHandle, source_id: &str, url: &Url) {
-    if check_scheme(url).is_ok() {
+    // A web page's window.open()/target=_blank must not be able to auto-open a
+    // local file; restrict new-window requests to remote schemes and our
+    // internal uwb: pages. Typed paths and OS file associations still reach
+    // file: through create_tab / navigate_tab, which the user drives directly.
+    if matches!(url.scheme(), "http" | "https" | "uwb") {
         emit_tab_event(app, source_id, "new-tab", url.to_string());
     }
 }
 
 pub fn tab_label(id: &str) -> String {
     format!("{TAB_PREFIX}{id}")
-}
-
-/// The tab id inside a webview label, i.e. the inverse of `tab_label`. Returns
-/// None for non-tab labels (e.g. the chrome webview).
-pub fn tab_id_of(label: &str) -> Option<&str> {
-    label.strip_prefix(TAB_PREFIX)
 }
 
 /// Only real navigable schemes plus our internal `uwb:` are allowed; anything
@@ -115,7 +113,7 @@ pub fn apply_bounds_to_all(app: &AppHandle) {
     let Some(window) = app.get_window("main") else {
         return;
     };
-    let insets = *app.state::<TabsState>().insets.lock().unwrap();
+    let insets = *app.state::<TabsState>().insets.lock().unwrap_or_else(|e| e.into_inner());
     let Ok((pos, size)) = content_rect(&window, insets) else {
         return;
     };
@@ -137,7 +135,7 @@ pub async fn create_tab(
     let window = app.get_window("main").ok_or("main window not found")?;
     let parsed = Url::parse(&url).map_err(|e| e.to_string())?;
     check_scheme(&parsed)?;
-    let insets = *state.insets.lock().unwrap();
+    let insets = *state.insets.lock().unwrap_or_else(|e| e.into_inner());
     let (pos, size) = content_rect(&window, insets).map_err(|e| e.to_string())?;
 
     let app_title = app.clone();
@@ -157,9 +155,6 @@ pub async fn create_tab(
         // a normal browser (in-page HTML5 DnD and file drops both work);
         // Tauri's own handler blocks HTML5 drag events on Windows.
         .disable_drag_drop_handler()
-        // Password-manager helpers + best-effort autofill, injected at document
-        // start on every frame. See src/passwords/content.js.
-        .initialization_script(crate::passwords::content_script())
         .on_document_title_changed(move |_webview, title| {
             emit_tab_event(&app_title, &id_title, "title", title);
         })
@@ -182,8 +177,6 @@ pub async fn create_tab(
             emit_tab_event(&app_load, &id_load, "loading", started.to_string());
             if !started {
                 emit_tab_event(&app_load, &id_load, "url", payload.url().to_string());
-                // Push matching logins into the page for inline autofill.
-                crate::passwords::prime_tab(&app_load, &id_load, payload.url().as_str());
             }
         });
 
@@ -295,9 +288,14 @@ pub async fn clear_browsing_data(app: AppHandle) -> Result<(), String> {
     }
     if let Some(dir) = browsing_data_dir(&app) {
         if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(|e| {
-                format!("could not remove browsing data ({e}); the web engine may still be shutting down — try again in a few seconds")
-            })?;
+            // The profile can be large; deleting it off the async worker keeps
+            // it from stalling other commands.
+            tauri::async_runtime::spawn_blocking(move || std::fs::remove_dir_all(&dir))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| {
+                    format!("could not remove browsing data ({e}); the web engine may still be shutting down — try again in a few seconds")
+                })?;
         }
     }
     Ok(())
@@ -313,7 +311,7 @@ pub async fn set_content_insets(
     left: f64,
     right: f64,
 ) -> Result<(), String> {
-    *state.insets.lock().unwrap() = Insets { top, left, right };
+    *state.insets.lock().unwrap_or_else(|e| e.into_inner()) = Insets { top, left, right };
     apply_bounds_to_all(&app);
     Ok(())
 }

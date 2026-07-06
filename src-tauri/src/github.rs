@@ -62,7 +62,7 @@ fn store<T: Clone>(slot: &Mutex<Option<(Instant, T)>>, value: &T) {
 
 async fn api(path: &str) -> Result<Value, String> {
     let client = http::shared()?;
-    client
+    let resp = client
         .get(format!("https://api.github.com/{path}"))
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
@@ -70,10 +70,8 @@ async fn api(path: &str) -> Result<Value, String> {
         .await
         .map_err(err)?
         .error_for_status()
-        .map_err(err)?
-        .json()
-        .await
-        .map_err(err)
+        .map_err(err)?;
+    http::json_capped(resp).await
 }
 
 #[tauri::command]

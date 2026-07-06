@@ -10,7 +10,6 @@ import {
   Hammer,
   History as HistoryIcon,
   House,
-  KeyRound,
   Lock,
   LockOpen,
   PanelLeft,
@@ -52,7 +51,6 @@ type Props = {
   onTerminal: () => void;
   onHistory: () => void;
   onSettings: () => void;
-  onPasswords: () => void;
   onTogglePin: () => void;
   onSuggestionsOpen: (open: boolean) => void;
   /** Opens the UWebBrowser repo — the toolbar's standing ask for a star. */
@@ -382,10 +380,6 @@ function ToolbarImpl(props: Props) {
       )}
 
       <GithubStars onClick={props.onGithub} />
-
-      <IconButton label="Passwords · Ctrl+Shift+L" onClick={props.onPasswords}>
-        <KeyRound aria-hidden />
-      </IconButton>
 
       <IconButton label="Settings · Ctrl+," onClick={props.onSettings}>
         <SettingsIcon aria-hidden />

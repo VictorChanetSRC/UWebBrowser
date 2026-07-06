@@ -116,7 +116,7 @@ pub async fn system_stats(
     // threads — and, per the note on `Monitor`, keep all WMI/COM work here on
     // the blocking pool rather than the main thread.
     tauri::async_runtime::spawn_blocking(move || {
-        let mut m = inner.lock().unwrap();
+        let mut m = inner.lock().unwrap_or_else(|e| e.into_inner());
 
         // CPU usage is the delta since the previous refresh (the poll interval).
         m.sys.refresh_cpu_usage();

@@ -101,6 +101,19 @@ fn read_folder_infos(app: &AppHandle) -> Vec<FolderInfo> {
     out
 }
 
+/// Join an extension-relative asset path under `dir`, refusing anything that
+/// escapes the extension directory. A manifest is attacker-controlled (any
+/// unpacked/CRX extension), so a value like `../../../secret` in an icon path
+/// or a `../..`-laden `default_locale` must not let us read files outside the
+/// extension. Both paths are canonicalized and the result must stay under
+/// `dir`; returns `None` (skip the asset) otherwise.
+fn safe_asset_path(dir: &std::path::Path, rel: &str) -> Option<std::path::PathBuf> {
+    let rel = rel.trim_start_matches(['/', '\\']);
+    let base = dir.canonicalize().ok()?;
+    let full = base.join(rel).canonicalize().ok()?;
+    full.starts_with(&base).then_some(full)
+}
+
 /// The manifest name, resolving a `__MSG_key__` i18n placeholder against the
 /// default locale's `messages.json`.
 fn resolve_name(dir: &std::path::Path, manifest: &serde_json::Value) -> Option<String> {
@@ -115,7 +128,7 @@ fn resolve_name(dir: &std::path::Path, manifest: &serde_json::Value) -> Option<S
         .get("default_locale")
         .and_then(|v| v.as_str())
         .unwrap_or("en");
-    let messages = dir.join("_locales").join(locale).join("messages.json");
+    let messages = safe_asset_path(dir, &format!("_locales/{locale}/messages.json"))?;
     let text = std::fs::read_to_string(messages).ok()?;
     let json = serde_json::from_str::<serde_json::Value>(&text).ok()?;
     // Message keys are matched case-insensitively by Chrome.
@@ -184,9 +197,10 @@ fn icon_data_uri(dir: &std::path::Path, manifest: &serde_json::Value) -> Option<
 
     let (_, rel) = best?;
     // Extension asset paths are root-relative and often start with `/`; a
-    // leading separator would make `join` treat them as absolute (C:\assets\…),
-    // so strip it. Windows accepts the remaining forward slashes as-is.
-    let path = dir.join(rel.trim_start_matches(['/', '\\']));
+    // leading separator would make `join` treat them as absolute (C:\assets\…).
+    // `safe_asset_path` strips it and rejects any `..` escape out of the
+    // extension dir. Windows accepts the remaining forward slashes as-is.
+    let path = safe_asset_path(dir, &rel)?;
     let bytes = std::fs::read(&path).ok()?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -496,16 +510,14 @@ pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<Ex
          ?response=redirect&acceptformat=crx2,crx3&prodversion={CHROME_VERSION}\
          &x=id%3D{id}%26installsource%3Dondemand%26uc"
     );
-    let bytes = crate::http::shared()?
+    let resp = crate::http::shared()?
         .get(&url)
         .send()
         .await
         .map_err(crate::http::err)?
         .error_for_status()
-        .map_err(crate::http::err)?
-        .bytes()
-        .await
         .map_err(crate::http::err)?;
+    let bytes = crate::http::body_capped(resp).await?;
 
     let zip = crx_inner_zip(&bytes)?;
     // The CRX header carries the extension's public key. Pin it into the
@@ -948,12 +960,42 @@ fn inject_manifest_key(dir: &std::path::Path, public_key_der: &[u8]) {
     }
 }
 
-/// Unpack a ZIP (the CRX payload) into `dest`. The `zip` crate rejects
-/// traversal paths, so a malicious archive can't escape the folder.
+/// Unpack a ZIP (the CRX payload) into `dest`. `enclosed_name` rejects
+/// traversal / absolute paths so a malicious archive can't escape the folder,
+/// and the total *decompressed* output is capped so a zip bomb (or an
+/// oversized store item) can't fill the disk. The cap is measured on bytes
+/// actually written, not the header's declared sizes, so a lying header can't
+/// bypass it.
 fn extract_zip(zip_bytes: &[u8], dest: &std::path::Path) -> Result<(), String> {
+    use std::io::Read;
+    const MAX_TOTAL: u64 = 256 * 1024 * 1024;
     let reader = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
-    archive.extract(dest).map_err(|e| e.to_string())?;
+    let mut written: u64 = 0;
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(rel) = file.enclosed_name() else {
+            continue;
+        };
+        let out = dest.join(rel);
+        if file.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut sink = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+        // Read at most the remaining budget (+1 so hitting the cap exactly still
+        // trips the check on the next byte).
+        let remaining = MAX_TOTAL.saturating_sub(written);
+        let n = std::io::copy(&mut (&mut file).take(remaining + 1), &mut sink)
+            .map_err(|e| e.to_string())?;
+        written = written.saturating_add(n);
+        if written > MAX_TOTAL {
+            return Err("extension archive is too large".to_string());
+        }
+    }
     Ok(())
 }
 

@@ -31,19 +31,30 @@ Note: if you ever protect the `main` branch, allow the default
 
 ## One-time setup
 
-### 1. Updater signing key (already generated)
+### 1. Updater signing key
 
-The keypair lives at `C:\Users\victo\.tauri\uwebbrowser.key` (+ `.pub`),
-generated **without a password**. The public key is already embedded in
-`tauri.conf.json`. Back the private key up somewhere safe (password
-manager) — **if you lose it, existing installs can never auto-update again**
-and users must manually reinstall.
+The updater keypair is the **sole root of trust for auto-updates** — anyone
+holding the private key can sign an update that every install silently accepts
+(installs run in `passive` mode). Treat it accordingly:
 
-Add this GitHub secret (repo → Settings → Secrets and variables → Actions):
+- **Protect it with a password.** Generate with
+  `npm run tauri signer generate -- -w <path-to-key>` and set a passphrase when
+  prompted (avoid the passwordless key the project shipped with — rotate to a
+  password-protected one when convenient; a rotation only affects *future*
+  updates, existing installs keep validating against the embedded public key
+  until they take an update signed by the new key, so plan the cutover).
+- **Don't leave the raw `.key` unencrypted on disk.** Keep it in a secrets
+  manager and pull it out only to configure CI.
+- Back it up somewhere safe — **if you lose it, existing installs can never
+  auto-update again** and users must manually reinstall.
+
+The public key is embedded in `tauri.conf.json`. Add these GitHub secrets
+(repo → Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 | --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | Full contents of `C:\Users\victo\.tauri\uwebbrowser.key` |
+| `TAURI_SIGNING_PRIVATE_KEY` | Full contents of the `.key` file |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The passphrase you set (leave unset only for a legacy passwordless key) |
 
 ### 2. Azure Trusted Signing (~$9.99/month)
 

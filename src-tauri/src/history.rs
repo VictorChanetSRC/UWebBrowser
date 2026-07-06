@@ -63,6 +63,13 @@ impl Recorder {
         archive_dir: Option<String>,
     ) -> Option<Recorder> {
         let dir = builds_dir(app).ok()?;
+        // job_id names two on-disk files (`<id>.jsonl` here, `<id>.json` in
+        // `finish`). It's supplied by the caller, so reject anything that isn't
+        // a plain id — a value like `..\..\evil` would otherwise create/
+        // overwrite files outside the builds dir.
+        if !valid_id(&req.job_id) {
+            return None;
+        }
         let log = File::create(dir.join(format!("{}.jsonl", req.job_id))).ok()?;
         Some(Recorder {
             dir,

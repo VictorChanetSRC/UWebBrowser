@@ -30,7 +30,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: main
           fetch-depth: 0
@@ -90,21 +90,21 @@ jobs:
     env:
       HAS_AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.version.outputs.sha }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
 
@@ -115,7 +115,7 @@ jobs:
       # cargo install only pays its compile cost once.
       - name: Install trusted-signing-cli
         if: env.HAS_AZURE_SIGNING == 'true'
-        uses: taiki-e/cache-cargo-install-action@v2
+        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2
         with:
           tool: trusted-signing-cli
 
@@ -141,11 +141,14 @@ jobs:
           "args=--bundles nsis --config src-tauri/tauri.sign.conf.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # Reads the passphrase from a secret; empty if the key is passwordless
+          # (legacy) so this stays backward-compatible while allowing a rotation
+          # to a password-protected key without touching the workflow.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -153,6 +156,9 @@ jobs:
           tagName: v${{ needs.version.outputs.version }}
           releaseName: "UWebBrowser v${{ needs.version.outputs.version }}"
           releaseBody: "See the assets below to download and install this version."
-          releaseDraft: false
+          # An unsigned build (Azure signing secrets absent) publishes as a
+          # draft so it is never auto-delivered to users; a signed build ships
+          # as a normal release.
+          releaseDraft: ${{ env.HAS_AZURE_SIGNING != 'true' }}
           prerelease: false
           args: ${{ steps.sign.outputs.args }}
