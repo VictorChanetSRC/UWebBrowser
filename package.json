@@ -1,7 +1,7 @@
 {
   "name": "uwebbrowser",
   "private": true,
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "The web browser for Unreal Engine developers.",
   "type": "module",
   "scripts": {
