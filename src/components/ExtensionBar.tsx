@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { Plus, Puzzle, Store } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Plus, Puzzle, Store, Trash2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ipc, type ExtInfo } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,30 @@ export function ExtensionBar({
   onBrowseStore,
   onToast,
 }: Props) {
+  // Right-click menu for removing a pinned extension.
+  const [menu, setMenu] = useState<{ id: string; name: string; x: number; y: number } | null>(
+    null,
+  );
+
+  const removeExtension = useCallback(
+    async (ext: ExtInfo) => {
+      setMenu(null);
+      // Dismiss the popup if we're removing the one that's open.
+      if (openId === ext.id) {
+        ipc.extClosePopup().catch(() => {});
+        onOpenChange(null);
+      }
+      try {
+        const next = await ipc.extUninstall(ext.id);
+        onExtensionsChange(next);
+        onToast(`Removed ${ext.name}`);
+      } catch (e) {
+        onToast(String(e));
+      }
+    },
+    [openId, onOpenChange, onExtensionsChange, onToast],
+  );
+
   const toggle = useCallback(
     (ext: ExtInfo, anchor: HTMLElement) => {
       // Clicking the open extension again dismisses it.
@@ -90,8 +114,12 @@ export function ExtensionBar({
               type="button"
               aria-label={ext.name}
               aria-pressed={openId === ext.id}
-              title={ext.name}
+              title={`${ext.name} (right-click to remove)`}
               onClick={(e) => toggle(ext, e.currentTarget)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ id: ext.id, name: ext.name, x: e.clientX, y: e.clientY });
+              }}
               className={cn(
                 "flex size-7 flex-none items-center justify-center rounded-md text-ink-400 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100",
                 openId === ext.id && "bg-ink-800 text-ink-100 ring-1 ring-ink-600",
@@ -126,6 +154,29 @@ export function ExtensionBar({
         <Plus className="size-3.5" aria-hidden />
         Load unpacked
       </button>
+
+      {menu && (
+        <>
+          {/* Click-away layer. */}
+          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div
+            className="fixed z-50 min-w-40 overflow-hidden rounded-md border border-border bg-background py-1 shadow-lg"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const ext = extensions.find((e) => e.id === menu.id);
+                if (ext) removeExtension(ext);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink-200 transition-colors duration-[130ms] ease-brand hover:bg-ink-800"
+            >
+              <Trash2 className="size-3.5 flex-none text-ink-400" aria-hidden />
+              <span className="truncate">Remove {menu.name}</span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

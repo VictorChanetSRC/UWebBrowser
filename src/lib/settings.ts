@@ -1,4 +1,9 @@
-export type SearchEngineKey = "duckduckgo" | "google" | "bing" | "brave";
+export type SearchEngineKey =
+  | "uwebsearch"
+  | "duckduckgo"
+  | "google"
+  | "bing"
+  | "brave";
 
 export type SearchEngine = {
   key: SearchEngineKey;
@@ -8,6 +13,12 @@ export type SearchEngine = {
 };
 
 export const searchEngines: SearchEngine[] = [
+  {
+    key: "uwebsearch",
+    label: "UWebSearch",
+    host: "uwebsearch.com",
+    searchUrl: (q) => `https://uwebsearch.com/search?q=${encodeURIComponent(q)}`,
+  },
   {
     key: "duckduckgo",
     label: "DuckDuckGo",
@@ -41,7 +52,7 @@ export type BrowserSettings = {
 const KEY = "uwb.settings";
 
 export const defaultSettings: BrowserSettings = {
-  searchEngine: "duckduckgo",
+  searchEngine: "uwebsearch",
 };
 
 export function engineFor(key: SearchEngineKey): SearchEngine {

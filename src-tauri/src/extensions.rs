@@ -241,7 +241,8 @@ mod imp {
         ICoreWebView2Profile7, ICoreWebView2_13,
     };
     use webview2_com::{
-        ProfileAddBrowserExtensionCompletedHandler, ProfileGetBrowserExtensionsCompletedHandler,
+        BrowserExtensionRemoveCompletedHandler, ProfileAddBrowserExtensionCompletedHandler,
+        ProfileGetBrowserExtensionsCompletedHandler,
     };
     use windows::core::{Interface, HSTRING, PWSTR};
 
@@ -338,6 +339,67 @@ mod imp {
             rx.recv_timeout(Duration::from_secs(15))
         })
         .await;
+    }
+
+    /// Remove the extension with the given runtime id from the live profile.
+    /// Enumerates the installed set, matches by id, and calls `Remove` (a nested
+    /// async callback), resolving once WebView2 reports completion.
+    pub async fn remove_extension(app: &AppHandle, id: String) -> bool {
+        let Some(host) = app.get_webview(EXT_HOST_LABEL) else {
+            return false;
+        };
+        let (tx, rx) = mpsc::channel::<bool>();
+        let _ = host.with_webview(move |pw| unsafe {
+            let ran = (|| -> windows::core::Result<()> {
+                let profile = profile7(&pw)?;
+                let tx = tx.clone();
+                let handler = ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(
+                    move |_hr, list| {
+                        let mut removing = false;
+                        if let Some(list) = list {
+                            let mut count = 0u32;
+                            if list.Count(&mut count).is_ok() {
+                                for i in 0..count {
+                                    let Ok(ext) = list.GetValueAtIndex(i) else {
+                                        continue;
+                                    };
+                                    let mut pid = PWSTR::null();
+                                    let _ = ext.Id(&mut pid);
+                                    if take_pwstr(pid) != id {
+                                        continue;
+                                    }
+                                    let tx = tx.clone();
+                                    let done = BrowserExtensionRemoveCompletedHandler::create(
+                                        Box::new(move |_hr| {
+                                            let _ = tx.send(true);
+                                            Ok(())
+                                        }),
+                                    );
+                                    removing = ext.Remove(&done).is_ok();
+                                    break;
+                                }
+                            }
+                        }
+                        // Nothing matched (or Remove failed to start): the remove
+                        // handler will never fire, so resolve here instead.
+                        if !removing {
+                            let _ = tx.send(false);
+                        }
+                        Ok(())
+                    },
+                ));
+                profile.GetBrowserExtensions(&handler)?;
+                Ok(())
+            })();
+            if ran.is_err() {
+                let _ = tx.send(false);
+            }
+        });
+        tauri::async_runtime::spawn_blocking(move || {
+            rx.recv_timeout(Duration::from_secs(10)).unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 
@@ -436,6 +498,59 @@ pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<Ex
     let _ = dest;
 
     ext_list(app).await
+}
+
+/// Uninstall an extension: remove it from the live WebView2 profile and delete
+/// its on-disk folder (otherwise `extensions_path` reloads it next launch).
+#[tauri::command]
+pub async fn ext_uninstall(app: AppHandle, id: String) -> Result<Vec<ExtInfo>, String> {
+    #[cfg(windows)]
+    {
+        // Learn the runtime name before removal so we can also match the folder
+        // for load-unpacked extensions (whose folder isn't named by id).
+        let name = imp::query_installed(&app)
+            .await
+            .into_iter()
+            .find(|(rid, _)| *rid == id)
+            .map(|(_, n)| n)
+            .unwrap_or_default();
+        imp::remove_extension(&app, id.clone()).await;
+        remove_extension_folder(&app, &id, &name);
+        // GetBrowserExtensions can still report the extension for a moment after
+        // Remove resolves, so drop it from the returned list explicitly.
+        let mut list = ext_list(app).await?;
+        list.retain(|e| e.id != id);
+        Ok(list)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+        ext_list(app).await
+    }
+}
+
+/// Delete the folder backing an installed extension. Store installs are named by
+/// their (now canonical) id; load-unpacked folders keep their source name, so
+/// fall back to matching the manifest/dir name.
+#[cfg(windows)]
+fn remove_extension_folder(app: &AppHandle, id: &str, name: &str) {
+    let Some(dir) = extensions_dir(app) else {
+        return;
+    };
+    let by_id = dir.join(id);
+    if by_id.is_dir() {
+        let _ = std::fs::remove_dir_all(&by_id);
+        return;
+    }
+    if name.is_empty() {
+        return;
+    }
+    for folder in read_folder_infos(app) {
+        if folder.name.eq_ignore_ascii_case(name) || folder.dir_name.eq_ignore_ascii_case(name) {
+            let _ = std::fs::remove_dir_all(dir.join(&folder.dir_name));
+            return;
+        }
+    }
 }
 
 /// Float an extension's popup page as a child webview anchored under the bar.

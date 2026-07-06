@@ -37,6 +37,8 @@ export const ipc = {
   extImport: (source: string) => invoke<ExtInfo[]>("ext_import", { source }),
   /** Install straight from the Chrome Web Store by extension id. */
   extInstallFromStore: (id: string) => invoke<ExtInfo[]>("ext_install_from_store", { id }),
+  /** Uninstall an extension by runtime id (removes it and deletes its folder). */
+  extUninstall: (id: string) => invoke<ExtInfo[]>("ext_uninstall", { id }),
   /** Float an extension's popup as a child webview (logical px coordinates). */
   extOpenPopup: (
     id: string,

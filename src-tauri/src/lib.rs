@@ -50,6 +50,7 @@ pub fn run() {
             extensions::ext_list,
             extensions::ext_import,
             extensions::ext_install_from_store,
+            extensions::ext_uninstall,
             extensions::ext_open_popup,
             extensions::ext_close_popup,
             terminal::term_create,

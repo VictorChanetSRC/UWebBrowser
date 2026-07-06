@@ -62,8 +62,9 @@ walkthrough — with a copy-paste template — is in
 
 ## Notes
 
-- The default search engine is DuckDuckGo; type anything without a dot in the
-  address bar to search.
+- The default search engine is UWebSearch, our search engine built for Unreal
+  Engine 5 game developers; type anything without a dot in the address bar to
+  search. You can switch engines in Settings.
 - Your setup (game name, Steam App ID, itch.io API key) is stored locally and never
   leaves your machine.
 
