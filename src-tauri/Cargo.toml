@@ -42,6 +42,8 @@ base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Rewrite the one extension self-check WebView2 misreports (see extensions.rs).
 regex = "1"
+# Derive an extension's canonical id from its CRX public key to pin `key`.
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

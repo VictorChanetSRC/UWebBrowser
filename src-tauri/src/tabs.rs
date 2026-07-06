@@ -9,6 +9,15 @@ use tauri::{
 pub const CHROME_LABEL: &str = "chrome";
 pub const TAB_PREFIX: &str = "tab-";
 
+/// User-Agent for page webviews. WebView2's default UA carries an `Edg/…` token,
+/// so sites that branch on the browser (e.g. Proton, which then targets its
+/// *Edge* extension id for the login handoff) misidentify us — but we install
+/// extensions from the *Chrome* Web Store. Presenting as vanilla Chrome keeps
+/// the browser identity and the installed extension ids consistent. Bump the
+/// version occasionally alongside `extensions::CHROME_VERSION`.
+const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+    AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 #[derive(Default)]
 pub struct TabsState {
     pub insets: Mutex<Insets>,
@@ -141,6 +150,9 @@ pub async fn create_tab(
     let id_new = id.clone();
 
     let mut builder = tauri::webview::WebviewBuilder::new(tab_label(&id), WebviewUrl::External(parsed))
+        // Present as vanilla Chrome (not Edge) so extension-aware sites target
+        // the Chrome Web Store ids we install. See CHROME_UA.
+        .user_agent(CHROME_UA)
         // Hand drag-and-drop back to WebView2 so pages behave like they do in
         // a normal browser (in-page HTML5 DnD and file drops both work);
         // Tauri's own handler blocks HTML5 drag events on Windows.

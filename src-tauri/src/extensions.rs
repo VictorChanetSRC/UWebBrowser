@@ -414,12 +414,20 @@ pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<Ex
         .map_err(crate::http::err)?;
 
     let zip = crx_inner_zip(&bytes)?;
+    // The CRX header carries the extension's public key. Pin it into the
+    // manifest as `key` (below) so Chromium/WebView2 derives the *canonical*
+    // Web Store id instead of a path-based one — pages that message the
+    // extension by its store id (e.g. Proton's post-login fork) then reach it.
+    let public_key = crx_public_key(&bytes, &id);
     let dir = extensions_dir(&app).ok_or("could not resolve the extensions folder")?;
     let dest = dir.join(&id);
     if dest.exists() {
         std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
     }
     extract_zip(zip, &dest)?;
+    if let Some(key) = public_key {
+        inject_manifest_key(&dest, &key);
+    }
     patch_permission_gates(&dest);
 
     #[cfg(windows)]
@@ -669,6 +677,128 @@ fn crx_inner_zip(bytes: &[u8]) -> Result<&[u8], String> {
         .get(zip_start..)
         .filter(|z| z.len() >= 4)
         .ok_or_else(|| "the CRX was truncated".to_string())
+}
+
+/// Extract the extension's public key (DER `SubjectPublicKeyInfo`) from a CRX,
+/// choosing the one that derives `expected_id`. Chromium derives the extension
+/// id from this key, so pinning it into the manifest as `key` gives the unpacked
+/// extension its canonical Web Store id.
+///
+/// A Web Store CRX3 is signed by *two* keys — the developer's and Google's
+/// publisher key — so we can't just take the first proof; we pick the one whose
+/// SHA-256 maps to the id we're installing.
+fn crx_public_key(bytes: &[u8], expected_id: &str) -> Option<Vec<u8>> {
+    if bytes.len() < 16 || &bytes[0..4] != b"Cr24" {
+        return None;
+    }
+    let u32_at = |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
+    match u32_at(4) {
+        // CRX2: magic(4) version(4) pubkey_len(4) sig_len(4) key sig zip — one key.
+        2 => {
+            let pk_len = u32_at(8) as usize;
+            bytes
+                .get(16..16 + pk_len)
+                .filter(|pk| id_from_public_key(pk) == expected_id)
+                .map(<[u8]>::to_vec)
+        }
+        // CRX3: magic(4) version(4) header_len(4) header zip. The header is a
+        // `CrxFileHeader` protobuf; each `sha256_with_rsa` (field 2) is an
+        // `AsymmetricKeyProof` whose `public_key` (field 1) is a DER key.
+        3 => {
+            let header_len = u32_at(8) as usize;
+            let header = bytes.get(12..12 + header_len)?;
+            pb_len_fields(header, 2)
+                .filter_map(|proof| pb_len_fields(proof, 1).next())
+                .find(|pk| id_from_public_key(pk) == expected_id)
+                .map(<[u8]>::to_vec)
+        }
+        _ => None,
+    }
+}
+
+/// The Chromium extension id for a DER public key: the first 16 bytes of its
+/// SHA-256, each nibble mapped `0..=15` → `'a'..='p'`.
+fn id_from_public_key(public_key_der: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(public_key_der);
+    let mut id = String::with_capacity(32);
+    for &byte in &digest[..16] {
+        id.push((b'a' + (byte >> 4)) as char);
+        id.push((b'a' + (byte & 0x0f)) as char);
+    }
+    id
+}
+
+/// Iterate the bytes of every length-delimited (wire type 2) protobuf field
+/// with the given number, skipping others. Minimal reader — only what a CRX3
+/// header needs.
+fn pb_len_fields(buf: &[u8], field: u64) -> impl Iterator<Item = &[u8]> {
+    let mut buf = buf;
+    std::iter::from_fn(move || {
+        while !buf.is_empty() {
+            let (tag, rest) = pb_varint(buf)?;
+            buf = rest;
+            match tag & 7 {
+                // LEN
+                2 => {
+                    let (len, rest) = pb_varint(buf)?;
+                    let val = rest.get(..len as usize)?;
+                    buf = rest.get(len as usize..)?;
+                    if tag >> 3 == field {
+                        return Some(val);
+                    }
+                }
+                // VARINT
+                0 => buf = pb_varint(buf)?.1,
+                // I64 / I32
+                1 => buf = buf.get(8..)?,
+                5 => buf = buf.get(4..)?,
+                _ => return None,
+            }
+        }
+        None
+    })
+}
+
+/// Read a protobuf base-128 varint, returning it and the remaining slice.
+fn pb_varint(buf: &[u8]) -> Option<(u64, &[u8])> {
+    let mut val = 0u64;
+    let mut shift = 0u32;
+    for (i, &b) in buf.iter().enumerate() {
+        val |= u64::from(b & 0x7f) << shift;
+        if b & 0x80 == 0 {
+            return Some((val, &buf[i + 1..]));
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+    None
+}
+
+/// Write the extension's public key into its manifest as `key`, so Chromium
+/// pins the canonical id. No-op if the manifest already declares a key.
+fn inject_manifest_key(dir: &std::path::Path, public_key_der: &[u8]) {
+    let path = dir.join("manifest.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut manifest) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    let Some(obj) = manifest.as_object_mut() else {
+        return;
+    };
+    if obj.contains_key("key") {
+        return;
+    }
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(public_key_der);
+    obj.insert("key".to_string(), serde_json::Value::String(b64));
+    if let Ok(out) = serde_json::to_string_pretty(&manifest) {
+        let _ = std::fs::write(&path, out);
+    }
 }
 
 /// Unpack a ZIP (the CRX payload) into `dest`. The `zip` crate rejects
