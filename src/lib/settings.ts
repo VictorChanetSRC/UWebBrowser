@@ -17,7 +17,7 @@ export const searchEngines: SearchEngine[] = [
     key: "uwebsearch",
     label: "UWebSearch",
     host: "uwebsearch.com",
-    searchUrl: (q) => `https://uwebsearch.com/search?q=${encodeURIComponent(q)}`,
+    searchUrl: (q) => `https://uwebsearch.com/?q=${encodeURIComponent(q)}`,
   },
   {
     key: "duckduckgo",

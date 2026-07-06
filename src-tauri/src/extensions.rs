@@ -410,8 +410,40 @@ mod imp {
 pub async fn ext_list(app: AppHandle) -> Result<Vec<ExtInfo>, String> {
     #[cfg(windows)]
     {
-        let runtime = imp::query_installed(&app).await;
-        Ok(merge(runtime, read_folder_infos(&app)))
+        let folders = read_folder_infos(&app);
+        let mut runtime = imp::query_installed(&app).await;
+        // Cold start: WebView2 loads the `extensions_path` extensions into the
+        // profile *asynchronously* after the host webview is created, so the
+        // first GetBrowserExtensions can report fewer than are on disk (or none,
+        // if the host webview isn't ready yet). Poll until the runtime set
+        // matches what's on disk, bailing early once the count stops changing so
+        // a single extension WebView2 refuses to load can't stall every call.
+        // Installs go through AddBrowserExtension (which already awaits
+        // registration), so this loop only does work at launch.
+        if runtime.len() < folders.len() {
+            let mut last = runtime.len();
+            let mut stable = 0;
+            for _ in 0..20 {
+                let _ = tauri::async_runtime::spawn_blocking(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(150))
+                })
+                .await;
+                runtime = imp::query_installed(&app).await;
+                if runtime.len() >= folders.len() {
+                    break;
+                }
+                if runtime.len() == last {
+                    stable += 1;
+                    if stable >= 4 {
+                        break;
+                    }
+                } else {
+                    stable = 0;
+                    last = runtime.len();
+                }
+            }
+        }
+        Ok(merge(runtime, folders))
     }
     #[cfg(not(windows))]
     {
