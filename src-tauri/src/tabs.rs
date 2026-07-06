@@ -43,6 +43,18 @@ fn emit_tab_event(app: &AppHandle, id: &str, kind: &str, value: String) {
     );
 }
 
+/// Ask the chrome UI to open `url` as a foreground tab. Raised by any webview
+/// that makes a new-window request: regular tab pages (via `on_new_window`) and
+/// the extension popup, whose "sign in" buttons open an auth page with
+/// `window.open`/`chrome.tabs.create`. `source_id` is the originating webview's
+/// tab id (or the popup label) — the chrome UI ignores it for `new-tab` events,
+/// but passing it keeps the event shape uniform.
+pub(crate) fn open_in_new_tab(app: &AppHandle, source_id: &str, url: &Url) {
+    if check_scheme(url).is_ok() {
+        emit_tab_event(app, source_id, "new-tab", url.to_string());
+    }
+}
+
 pub fn tab_label(id: &str) -> String {
     format!("{TAB_PREFIX}{id}")
 }
@@ -150,9 +162,7 @@ pub async fn create_tab(
         // means window.open() returns null to the page, so opener-based popup
         // flows (some OAuth logins) don't work — no worse than before.
         .on_new_window(move |url, _features| {
-            if check_scheme(&url).is_ok() {
-                emit_tab_event(&app_new, &id_new, "new-tab", url.to_string());
-            }
+            open_in_new_tab(&app_new, &id_new, &url);
             NewWindowResponse::Deny
         })
         .on_page_load(move |_webview, payload| {

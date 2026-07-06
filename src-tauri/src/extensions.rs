@@ -442,6 +442,7 @@ pub async fn ext_open_popup(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
+    use tauri::webview::{NewWindowResponse, PageLoadEvent};
     use tauri::{LogicalPosition, LogicalSize, Url, WebviewUrl};
 
     // Guard against a bad runtime id: an empty/short id yields
@@ -469,10 +470,35 @@ pub async fn ext_open_popup(
     // chrome-extension:// URL as a webview's *initial* source and falls back to
     // its new-tab page, but a post-creation navigation to it resolves fine.
     let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
+    // Redo the navigation from the placeholder's page-load event. This command
+    // runs off the main thread, so the eager `navigate()` below is only *queued*
+    // (see send_user_message in tauri-runtime-wry) and races the webview's
+    // initial about:blank load — in release builds it loses that race and the
+    // popup stays blank (it only appeared to work in dev because the extra
+    // queued open_devtools message shifted the timing). This callback fires on
+    // the main thread once about:blank is live, so its navigate always lands.
+    let nav_target = parsed.clone();
+    let app_new = app.clone();
     let mut builder =
         tauri::webview::WebviewBuilder::new(EXT_POPUP_LABEL, WebviewUrl::External(blank))
             .browser_extensions_enabled(true)
-            .disable_drag_drop_handler();
+            .disable_drag_drop_handler()
+            .on_page_load(move |webview, payload| {
+                if matches!(payload.event(), PageLoadEvent::Finished)
+                    && payload.url().scheme() == "about"
+                {
+                    let _ = webview.navigate(nav_target.clone());
+                }
+            })
+            // The popup's "sign in" buttons open the auth page via
+            // window.open/chrome.tabs.create; without a handler WebView2 drops
+            // the request (why sign-in did nothing). Route it to a real tab —
+            // switching tabs dismisses this popup, and the shared profile means
+            // the login it completes unlocks the extension here.
+            .on_new_window(move |url, _features| {
+                crate::tabs::open_in_new_tab(&app_new, EXT_POPUP_LABEL, &url);
+                NewWindowResponse::Deny
+            });
     // Share the tab profile so the popup and the content scripts see the same
     // extension background/storage (this is what lets a login in the popup
     // unlock autofill on the page).
@@ -490,7 +516,13 @@ pub async fn ext_open_popup(
             LogicalSize::new(width.max(120.0), height.max(120.0)),
         )
         .map_err(|e| e.to_string())?;
+    // Fast path: usually lands immediately. The on_page_load handler above is
+    // the reliability net for when this queued navigate loses the race.
     popup_view.navigate(parsed).map_err(|e| e.to_string())?;
+    // Dev-only: surface the popup's console so a blank extension page (usually a
+    // service-worker/`chrome.runtime` failure) can be diagnosed.
+    #[cfg(debug_assertions)]
+    popup_view.open_devtools();
     Ok(())
 }
 
