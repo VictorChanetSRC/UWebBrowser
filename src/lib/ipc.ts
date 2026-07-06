@@ -108,7 +108,6 @@ export type ExtInfo = {
   name: string;
   popup: string | null;
   icon: string | null;
-  enabled: boolean;
 };
 
 export type SteamStats = {

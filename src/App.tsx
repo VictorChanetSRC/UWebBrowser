@@ -373,6 +373,19 @@ export default function App() {
     setOpenExtId(null);
   }, [activeId]);
 
+  // The popup is anchored to a fixed spot under its bar button; a window resize
+  // moves that anchor out from under it (it's not repositioned), so dismiss it
+  // rather than leave it floating over stale coordinates.
+  useEffect(() => {
+    const onResize = () => {
+      if (!openExtIdRef.current) return;
+      ipc.extClosePopup().catch(() => {});
+      setOpenExtId(null);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const reorderTabs = useCallback((from: number, to: number) => {
     setTabs((prev) => {
       if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) {

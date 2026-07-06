@@ -53,13 +53,20 @@ pub const MAX_BODY: usize = 16 * 1024 * 1024;
 /// Read a response body with a hard byte cap. Streams chunk-by-chunk (via
 /// `Response::chunk`, no extra reqwest features) so we never buffer more than
 /// `MAX_BODY`, and rejects early when the server declares an oversize length.
-pub async fn body_capped(mut resp: reqwest::Response) -> Result<Vec<u8>, String> {
-    if resp.content_length().map_or(false, |len| len as usize > MAX_BODY) {
+pub async fn body_capped(resp: reqwest::Response) -> Result<Vec<u8>, String> {
+    body_capped_max(resp, MAX_BODY).await
+}
+
+/// [`body_capped`] with a caller-chosen ceiling. The default `MAX_BODY` fits
+/// feeds/JSON, but a Chrome Web Store CRX can be far larger, so that path passes
+/// its own (still bounded) cap rather than being clipped by the feed limit.
+pub async fn body_capped_max(mut resp: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    if resp.content_length().map_or(false, |len| len as usize > max) {
         return Err("response too large".to_string());
     }
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(err)? {
-        if buf.len() + chunk.len() > MAX_BODY {
+        if buf.len() + chunk.len() > max {
             return Err("response too large".to_string());
         }
         buf.extend_from_slice(&chunk);

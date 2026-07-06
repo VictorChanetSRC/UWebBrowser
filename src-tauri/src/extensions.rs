@@ -3,8 +3,8 @@
 //! WebView2 can run *real, unpacked* Chrome extensions natively: the engine
 //! loads a folder per extension (`extensions_path` at webview creation, handled
 //! by wry) and exposes them per browsing profile via `ICoreWebView2Profile7`.
-//! Everything here lives in the tab webviews' `browsing` profile — the same one
-//! the password manager uses — so the chrome UI webview is never extension-host.
+//! Everything here lives in the tab webviews' `browsing` profile, shared by the
+//! hidden host webview — so the chrome UI webview is never an extension host.
 //!
 //! Two things the engine does *not* give us, which this module adds:
 //!
@@ -31,6 +31,33 @@ pub const EXT_POPUP_LABEL: &str = "ext-popup";
 /// plausible Chrome version for the download to be served; bump occasionally.
 const CHROME_VERSION: &str = "131.0.6778.86";
 
+/// Largest CRX we'll download from the store. Real extensions bundle WASM,
+/// locales and media and routinely exceed the 16 MiB feed cap in `http`, so the
+/// store path gets its own (still bounded) ceiling — kept at/below the
+/// decompressed cap in [`extract_zip`] so a download can't outgrow extraction.
+const MAX_CRX: usize = 128 * 1024 * 1024;
+
+/// Marker file dropped into a patched extension folder so we don't re-read and
+/// regex-scan its entire JS tree on every launch. Its contents are
+/// [`PATCH_VERSION`]; bump that when [`patch_js_file`]'s rewrite changes so a
+/// stale marker forces a re-patch.
+const PATCH_MARKER: &str = ".uwb-permpatch";
+const PATCH_VERSION: &str = "1";
+
+/// Outcome of a live `AddBrowserExtension` call, so a failed install surfaces an
+/// error instead of a silent false success.
+#[cfg(windows)]
+enum AddOutcome {
+    /// WebView2 registered the extension.
+    Added,
+    /// The call completed but WebView2 refused the folder (invalid or
+    /// unsupported manifest). The freshly-written folder is safe to delete.
+    Rejected,
+    /// The call never completed — host missing, failed to start, or timed out.
+    /// The extension may in fact be registered, so the folder is left in place.
+    Unknown,
+}
+
 /// One installed extension, as the pinned bar needs it.
 #[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +71,6 @@ pub struct ExtInfo {
     /// The action/toolbar icon as a `data:` URI, read straight from the folder
     /// (the chrome webview can't load `chrome-extension://` icons itself).
     pub icon: Option<String>,
-    pub enabled: bool,
 }
 
 /// The folder that backs the on-disk extension store. Each immediate subfolder
@@ -225,9 +251,19 @@ fn merge(runtime: Vec<(String, String)>, folders: Vec<FolderInfo>) -> Vec<ExtInf
             let folder = if single_pair {
                 folders.first()
             } else {
-                folders.iter().find(|f| {
-                    f.name.eq_ignore_ascii_case(&rname) || f.dir_name.eq_ignore_ascii_case(&rname)
-                })
+                // Store installs name the folder by the (canonical) runtime id,
+                // so match on that first — it's collision-proof, unlike the name,
+                // which two extensions can share. Fall back to name/dir for
+                // load-unpacked folders, whose name is path-derived.
+                folders
+                    .iter()
+                    .find(|f| f.dir_name.eq_ignore_ascii_case(&id))
+                    .or_else(|| {
+                        folders.iter().find(|f| {
+                            f.name.eq_ignore_ascii_case(&rname)
+                                || f.dir_name.eq_ignore_ascii_case(&rname)
+                        })
+                    })
             };
             ExtInfo {
                 name: if rname.is_empty() {
@@ -237,7 +273,6 @@ fn merge(runtime: Vec<(String, String)>, folders: Vec<FolderInfo>) -> Vec<ExtInf
                 },
                 popup: folder.and_then(|f| f.popup.clone()),
                 icon: folder.and_then(|f| f.icon.clone()),
-                enabled: true,
                 id,
             }
         })
@@ -325,20 +360,27 @@ mod imp {
         .unwrap_or_default()
     }
 
-    /// Install one unpacked extension folder into the live profile, resolving
-    /// once WebView2 reports completion.
-    pub async fn add_extension(app: &AppHandle, folder: PathBuf) {
+    /// Install one unpacked extension folder into the live profile, resolving to
+    /// the [`AddOutcome`] once WebView2 reports completion (or times out). On
+    /// success WebView2 hands back the created extension; on rejection it passes
+    /// a null one, which is how we tell a bad manifest from a slow success.
+    pub async fn add_extension(app: &AppHandle, folder: PathBuf) -> AddOutcome {
         let Some(host) = app.get_webview(EXT_HOST_LABEL) else {
-            return;
+            return AddOutcome::Unknown;
         };
-        let (tx, rx) = mpsc::channel::<bool>();
+        let (tx, rx) = mpsc::channel::<AddOutcome>();
         let _ = host.with_webview(move |pw| unsafe {
             let started = (|| -> windows::core::Result<()> {
                 let profile = profile7(&pw)?;
                 let tx = tx.clone();
                 let handler = ProfileAddBrowserExtensionCompletedHandler::create(Box::new(
-                    move |_hr, _ext| {
-                        let _ = tx.send(true);
+                    move |_hr, ext| {
+                        let outcome = if ext.is_some() {
+                            AddOutcome::Added
+                        } else {
+                            AddOutcome::Rejected
+                        };
+                        let _ = tx.send(outcome);
                         Ok(())
                     },
                 ));
@@ -346,13 +388,15 @@ mod imp {
                 Ok(())
             })();
             if started.is_err() {
-                let _ = tx.send(false);
+                let _ = tx.send(AddOutcome::Unknown);
             }
         });
-        let _ = tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             rx.recv_timeout(Duration::from_secs(15))
+                .unwrap_or(AddOutcome::Unknown)
         })
-        .await;
+        .await
+        .unwrap_or(AddOutcome::Unknown)
     }
 
     /// Remove the extension with the given runtime id from the live profile.
@@ -424,6 +468,12 @@ mod imp {
 pub async fn ext_list(app: AppHandle) -> Result<Vec<ExtInfo>, String> {
     #[cfg(windows)]
     {
+        // Self-heal: if the host webview never came up (or was torn down), the
+        // profile can't be enumerated. Recreate it before querying so the bar
+        // recovers instead of staying empty for the rest of the session.
+        if app.get_webview(EXT_HOST_LABEL).is_none() {
+            spawn_host(&app);
+        }
         let folders = read_folder_infos(&app);
         let mut runtime = imp::query_installed(&app).await;
         // Cold start: WebView2 loads the `extensions_path` extensions into the
@@ -486,11 +536,31 @@ pub async fn ext_import(app: AppHandle, source: String) -> Result<Vec<ExtInfo>, 
     patch_permission_gates(&dest);
 
     #[cfg(windows)]
-    imp::add_extension(&app, dest).await;
+    add_or_cleanup(&app, dest).await?;
     #[cfg(not(windows))]
     let _ = dest;
 
     ext_list(app).await
+}
+
+/// Install a freshly-written extension folder into the live profile and turn the
+/// outcome into a command result. A definitively-rejected folder is deleted so
+/// it isn't re-scanned and retried on every launch; a folder whose install never
+/// confirmed is left in place (it may actually have registered).
+#[cfg(windows)]
+async fn add_or_cleanup(app: &AppHandle, dest: PathBuf) -> Result<(), String> {
+    match imp::add_extension(app, dest.clone()).await {
+        AddOutcome::Added => Ok(()),
+        AddOutcome::Rejected => {
+            let _ = std::fs::remove_dir_all(&dest);
+            Err("WebView2 refused that extension — its manifest may be invalid or unsupported"
+                .to_string())
+        }
+        AddOutcome::Unknown => Err(
+            "the extension didn't finish installing — reopen the extensions bar to check whether it loaded"
+                .to_string(),
+        ),
+    }
 }
 
 /// Install an extension straight from the Chrome Web Store by id — the same
@@ -517,7 +587,7 @@ pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<Ex
         .map_err(crate::http::err)?
         .error_for_status()
         .map_err(crate::http::err)?;
-    let bytes = crate::http::body_capped(resp).await?;
+    let bytes = crate::http::body_capped_max(resp, MAX_CRX).await?;
 
     let zip = crx_inner_zip(&bytes)?;
     // The CRX header carries the extension's public key. Pin it into the
@@ -537,7 +607,7 @@ pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<Ex
     patch_permission_gates(&dest);
 
     #[cfg(windows)]
-    imp::add_extension(&app, dest).await;
+    add_or_cleanup(&app, dest).await?;
     #[cfg(not(windows))]
     let _ = dest;
 
@@ -624,9 +694,21 @@ pub async fn ext_open_popup(
         return Err("this extension has no popup page".to_string());
     }
 
-    // Replace any popup already showing.
+    // Replace any popup already showing. `close()` is processed on the event
+    // loop, not synchronously, so wait for the label to actually free up before
+    // the `add_child` below reuses it — otherwise switching quickly between two
+    // extensions races the still-live webview and the new popup fails to open.
     if let Some(existing) = app.get_webview(EXT_POPUP_LABEL) {
         let _ = existing.close();
+        for _ in 0..30 {
+            if app.get_webview(EXT_POPUP_LABEL).is_none() {
+                break;
+            }
+            let _ = tauri::async_runtime::spawn_blocking(|| {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            })
+            .await;
+        }
     }
 
     let window = app.get_window("main").ok_or("main window not found")?;
@@ -738,12 +820,18 @@ pub fn spawn_host(app: &AppHandle) {
         builder = builder.extensions_path(dir);
     }
     // Parked offscreen at 1×1; hidden right after so it never paints.
-    if let Ok(host) = window.add_child(
+    match window.add_child(
         builder,
         LogicalPosition::new(-4000.0, -4000.0),
         LogicalSize::new(1.0, 1.0),
     ) {
-        let _ = host.hide();
+        Ok(host) => {
+            let _ = host.hide();
+        }
+        // Without the host webview the profile can't be enumerated, so the bar
+        // shows nothing (tabs still load extensions from disk). `ext_list`
+        // retries this, so a transient failure self-heals on the next call.
+        Err(e) => eprintln!("extension host webview failed to spawn: {e}"),
     }
 }
 
@@ -759,8 +847,17 @@ pub fn spawn_host(app: &AppHandle) {
 /// Applied to unpacked extensions on this machine only. Also strips `_metadata`
 /// so an edited unpacked extension carries no stale store integrity hashes.
 fn patch_permission_gates(dir: &std::path::Path) {
+    // Already patched by a previous run at the current version? The rewrite is
+    // idempotent and the edited files persist on disk, so skip re-reading and
+    // regex-scanning the whole (often multi-MB) JS tree — this runs at every
+    // launch for every installed extension, so the marker keeps startup cheap.
+    let marker = dir.join(PATCH_MARKER);
+    if std::fs::read_to_string(&marker).ok().as_deref() == Some(PATCH_VERSION) {
+        return;
+    }
     let _ = std::fs::remove_dir_all(dir.join("_metadata"));
     patch_js_tree(dir);
+    let _ = std::fs::write(&marker, PATCH_VERSION);
 }
 
 fn patch_js_tree(dir: &std::path::Path) {
@@ -1003,9 +1100,16 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        // `read_dir` doesn't follow symlinks, but `fs::copy`/recursion would:
+        // skip them so a symlinked file/dir in an unpacked extension can't pull
+        // content in from outside the picked folder.
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
         let from = entry.path();
         let to = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
+        if file_type.is_dir() {
             copy_dir_all(&from, &to)?;
         } else {
             std::fs::copy(&from, &to)?;
