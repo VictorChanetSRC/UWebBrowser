@@ -509,16 +509,25 @@ pub async fn ext_open_popup(
         builder = builder.extensions_path(dir);
     }
 
+    let w = width.max(120.0);
+    let h = height.max(120.0);
     let popup_view = window
         .add_child(
             builder,
             LogicalPosition::new(x, y),
-            LogicalSize::new(width.max(120.0), height.max(120.0)),
+            LogicalSize::new(w, h),
         )
         .map_err(|e| e.to_string())?;
     // Fast path: usually lands immediately. The on_page_load handler above is
     // the reliability net for when this queued navigate loses the race.
     popup_view.navigate(parsed).map_err(|e| e.to_string())?;
+    // A freshly-created child webview can stay blank in release builds until it
+    // receives a size change — tab webviews get one from `apply_bounds_to_all`
+    // right after creation, but the popup never did, so it only painted in dev
+    // where `open_devtools` forced a relayout. Jiggle the size (a delta, not the
+    // identical value, or WebView2 skips it) to force the first paint.
+    let _ = popup_view.set_size(LogicalSize::new(w, h - 1.0));
+    let _ = popup_view.set_size(LogicalSize::new(w, h));
     // Dev-only: surface the popup's console so a blank extension page (usually a
     // service-worker/`chrome.runtime` failure) can be diagnosed.
     #[cfg(debug_assertions)]
