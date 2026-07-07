@@ -4,11 +4,42 @@ import type { PlatformHit } from "./platforms";
 
 export type TabEventPayload = {
   id: string;
-  /** "new-tab" carries a URL the page asked to open in a new tab
-   *  (window.open / target="_blank"); `id` is the opener tab. */
-  kind: "title" | "url" | "loading" | "new-tab";
+  /** - "new-tab": a URL the page asked to open in a new tab
+   *    (window.open / target="_blank"); `id` is the opener tab.
+   *  - "shortcut": a browser accelerator (Ctrl+T, F5, …) pressed while the
+   *    native page had focus; `value` is the action name (see App.tsx).
+   *  - "zoom": the page zoom changed natively; `value` is the percent.
+   *  - "crashed": the tab's renderer process died (show a reload panel).
+   *  - "favicon": the page's real favicon URL.
+   *  - "download": JSON `{ state: "start"|"done"|"fail", name, path }`. */
+  kind:
+    | "title"
+    | "url"
+    | "loading"
+    | "new-tab"
+    | "shortcut"
+    | "zoom"
+    | "crashed"
+    | "favicon"
+    | "download";
   value: string;
 };
+
+/**
+ * Coalesce concurrent identical calls: while a request for `key` is in flight,
+ * later callers share the same promise instead of issuing a duplicate. Combined
+ * with the backend TTL caches, co-mounted widgets that poll the same data
+ * (e.g. a Game tile and a Steam sidebar widget for one app) hit the network
+ * once per tick rather than N times.
+ */
+const inflight = new Map<string, Promise<unknown>>();
+function coalesce<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const existing = inflight.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = run().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
 
 /** A chunk of PTY output for one terminal session. */
 export type TermOutputPayload = { id: string; data: string };
@@ -25,6 +56,11 @@ export const ipc = {
   goForward: (id: string) => invoke("tab_eval", { id, js: "history.forward()" }),
   reload: (id: string) => invoke("tab_eval", { id, js: "location.reload()" }),
   stop: (id: string) => invoke("tab_eval", { id, js: "window.stop()" }),
+  /** Find-in-page via Chromium's window.find; steps matches as the bar is used. */
+  tabFind: (id: string, query: string, forward: boolean, fromStart: boolean) =>
+    invoke("tab_find", { id, query, forward, fromStart }),
+  /** Set a tab's zoom factor (1.0 == 100%). */
+  tabZoom: (id: string, factor: number) => invoke("tab_zoom", { id, factor }),
   /** The tab's live document URL — tracks History-API (SPA) navigations that
    *  fire no page-load event. */
   tabLiveUrl: (id: string) => invoke<string>("tab_live_url", { id }),
@@ -49,18 +85,29 @@ export const ipc = {
     height: number,
   ) => invoke("ext_open_popup", { id, popup, x, y, width, height }),
   extClosePopup: () => invoke("ext_close_popup"),
-  steamStats: (appid: string) => invoke<SteamStats>("steam_stats", { appid }),
-  steamPlayers: (appid: string) => invoke<number | null>("steam_players", { appid }),
-  redditSearch: (query: string) => invoke<RedditPost[]>("reddit_search", { query }),
-  itchGames: (apiKey: string) => invoke<ItchGame[]>("itch_games", { apiKey }),
-  fetchFeed: (url: string) => invoke<FeedItem[]>("fetch_feed", { url }),
+  steamStats: (appid: string) =>
+    coalesce(`steam_stats:${appid}`, () => invoke<SteamStats>("steam_stats", { appid })),
+  steamPlayers: (appid: string) =>
+    coalesce(`steam_players:${appid}`, () =>
+      invoke<number | null>("steam_players", { appid }),
+    ),
+  redditSearch: (query: string) =>
+    coalesce(`reddit:${query}`, () => invoke<RedditPost[]>("reddit_search", { query })),
+  itchGames: (apiKey: string) =>
+    coalesce(`itch:${apiKey}`, () => invoke<ItchGame[]>("itch_games", { apiKey })),
+  fetchFeed: (url: string) =>
+    coalesce(`feed:${url}`, () => invoke<FeedItem[]>("fetch_feed", { url })),
   steamFeatured: (category: string) =>
-    invoke<SteamFeaturedItem[]>("steam_featured", { category }),
-  epicFreeGames: () => invoke<EpicFreeGame[]>("epic_free_games"),
+    coalesce(`featured:${category}`, () =>
+      invoke<SteamFeaturedItem[]>("steam_featured", { category }),
+    ),
+  epicFreeGames: () => coalesce("epic", () => invoke<EpicFreeGame[]>("epic_free_games")),
   checkPlatform: (platform: string, query: string) =>
     invoke<PlatformHit>("check_platform", { platform, query }),
-  githubRepoStats: () => invoke<GithubRepoStats>("github_repo_stats"),
-  githubReleases: () => invoke<GithubRelease[]>("github_releases"),
+  githubRepoStats: () =>
+    coalesce("github_stats", () => invoke<GithubRepoStats>("github_repo_stats")),
+  githubReleases: () =>
+    coalesce("github_releases", () => invoke<GithubRelease[]>("github_releases")),
   onTabEvent: (handler: (payload: TabEventPayload) => void): Promise<UnlistenFn> =>
     listen<TabEventPayload>("tab-event", (event) => handler(event.payload)),
   termCreate: (id: string, cols: number, rows: number) =>
@@ -80,7 +127,7 @@ export const ipc = {
   /** A URL forwarded from a second app launch while we're already running. */
   onOpenUrl: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("open-url", (event) => handler(event.payload)),
-  detectEngines: () => invoke<EngineInstall[]>("detect_engines"),
+  detectEngines: () => coalesce("detect_engines", () => invoke<EngineInstall[]>("detect_engines")),
   validateEngine: (path: string) => invoke<EngineInstall>("validate_engine", { path }),
   readUproject: (path: string) => invoke<UProjectInfo>("read_uproject", { path }),
   /** Open a .uproject in the Unreal editor; `enginePath` picks the binary,

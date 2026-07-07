@@ -39,7 +39,10 @@ export function loadSession(): { tabs: Tab[]; activeId: string } | null {
         kind: t.kind,
         url: t.url,
         title: typeof t.title === "string" ? t.title : "",
-        loading: t.kind === "web",
+        // Restored web tabs are created lazily on first activation, so they
+        // aren't loading yet — the one that gets materialized will emit its own
+        // loading events.
+        loading: false,
       }));
     if (tabs.length === 0) return null;
     const activeId = tabs.some((t) => t.id === saved.activeId)

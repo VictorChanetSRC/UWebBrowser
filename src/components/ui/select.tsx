@@ -30,6 +30,7 @@ export function Select({
 
   const selected = options.find((o) => o.value === value);
   const selectedIndex = Math.max(0, options.findIndex((o) => o.value === value));
+  const optionId = (index: number) => `${listId}-opt-${index}`;
 
   useEffect(() => {
     if (!open) return;
@@ -78,6 +79,7 @@ export function Select({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
+        aria-activedescendant={open ? optionId(active) : undefined}
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
@@ -104,6 +106,7 @@ export function Select({
           {options.map((option, index) => (
             <li
               key={option.value}
+              id={optionId(index)}
               role="option"
               aria-selected={option.value === value}
               onMouseEnter={() => setActive(index)}

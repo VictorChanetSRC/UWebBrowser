@@ -39,12 +39,14 @@ function GithubBody({ widget, active, onOpen }: DashBodyProps<GithubWidget>) {
     [],
     900_000,
     active,
+    "github_stats",
   );
   const { data: releases } = usePolled(
     () => ipc.githubReleases(),
     [],
     1_800_000,
     active,
+    "github_releases",
   );
   const tall = widget.span.r > 1 || widget.span.c > 1;
   const shown = releases?.slice(0, tall ? 5 : 2);

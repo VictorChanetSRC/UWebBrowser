@@ -35,10 +35,12 @@ export function SearchField({
       <Search className="size-4 shrink-0 text-ink-500" aria-hidden />
       <input
         key={inputKey}
+        type="search"
         autoFocus={autoFocus}
         value={shown}
         spellCheck={false}
         placeholder={placeholder}
+        aria-label={placeholder}
         onChange={(e) => {
           setInner(e.target.value);
           onValueChange?.(e.target.value);

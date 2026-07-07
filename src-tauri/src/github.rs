@@ -60,6 +60,14 @@ fn store<T: Clone>(slot: &Mutex<Option<(Instant, T)>>, value: &T) {
     }
 }
 
+/// The last stored value regardless of age. GitHub's unauthenticated budget is
+/// 60 req/hr; when it's exhausted every call 403s, so on error we serve the
+/// last-good snapshot (stars barely move in 15 min) instead of an error and a
+/// blank widget.
+fn stale<T: Clone>(slot: &Mutex<Option<(Instant, T)>>) -> Option<T> {
+    slot.lock().ok()?.as_ref().map(|(_, value)| value.clone())
+}
+
 async fn api(path: &str) -> Result<Value, String> {
     let client = http::shared()?;
     let resp = client
@@ -79,7 +87,10 @@ pub async fn github_repo_stats() -> Result<RepoStats, String> {
     if let Some(hit) = cached(&STATS) {
         return Ok(hit);
     }
-    let repo = api(&format!("repos/{REPO}")).await?;
+    let repo = match api(&format!("repos/{REPO}")).await {
+        Ok(repo) => repo,
+        Err(e) => return stale(&STATS).ok_or(e),
+    };
     let stats = RepoStats {
         stars: repo["stargazers_count"].as_u64().unwrap_or(0),
         forks: repo["forks_count"].as_u64().unwrap_or(0),
@@ -94,7 +105,10 @@ pub async fn github_releases() -> Result<Vec<Release>, String> {
     if let Some(hit) = cached(&RELEASES) {
         return Ok(hit);
     }
-    let list = api(&format!("repos/{REPO}/releases?per_page=8")).await?;
+    let list = match api(&format!("repos/{REPO}/releases?per_page=8")).await {
+        Ok(list) => list,
+        Err(e) => return stale(&RELEASES).ok_or(e),
+    };
     let releases: Vec<Release> = list
         .as_array()
         .map(|entries| {

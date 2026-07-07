@@ -59,14 +59,31 @@ fn best(query: &str, candidates: Vec<Candidate>) -> PlatformHit {
 
 /// Collect every JSON node matching `pred`, depth-first. The storefront
 /// responses nest results unpredictably; walking beats chasing their
-/// exact shapes.
+/// exact shapes. Depth is bounded so a pathologically nested (or hostile)
+/// response can't overflow the stack — real store payloads nest well under 64.
 fn walk<'a>(v: &'a Value, out: &mut Vec<&'a Value>, pred: &dyn Fn(&Value) -> bool) {
+    walk_depth(v, out, pred, 0)
+}
+
+fn walk_depth<'a>(
+    v: &'a Value,
+    out: &mut Vec<&'a Value>,
+    pred: &dyn Fn(&Value) -> bool,
+    depth: u32,
+) {
     if pred(v) {
         out.push(v);
     }
+    if depth >= 64 {
+        return;
+    }
     match v {
-        Value::Array(items) => items.iter().for_each(|item| walk(item, out, pred)),
-        Value::Object(map) => map.values().for_each(|item| walk(item, out, pred)),
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| walk_depth(item, out, pred, depth + 1)),
+        Value::Object(map) => map
+            .values()
+            .for_each(|item| walk_depth(item, out, pred, depth + 1)),
         _ => {}
     }
 }
@@ -368,14 +385,28 @@ async fn itch(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> 
     Ok(best(q, candidates))
 }
 
+/// A client id discovered from the homepage after the baked-in one rotated,
+/// remembered for the session so we don't re-scrape the homepage on every call.
+static DISCOVERED_TWITCH_ID: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 /// Twitch category lookup via the public web client's GraphQL endpoint.
 /// If the baked-in client id has rotated, pull the current one from the
-/// homepage and retry once.
+/// homepage, remember it, and retry once.
 async fn twitch(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {
-    match twitch_gql(client, q, TWITCH_CLIENT_ID).await {
+    // Prefer an id already discovered this session over the (possibly stale)
+    // baked-in constant.
+    let primary = DISCOVERED_TWITCH_ID
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| TWITCH_CLIENT_ID.to_string());
+    match twitch_gql(client, q, &primary).await {
         Ok(hit) => Ok(hit),
         Err(_) => {
             let id = twitch_client_id(client).await?;
+            if let Ok(mut g) = DISCOVERED_TWITCH_ID.lock() {
+                *g = Some(id.clone());
+            }
             twitch_gql(client, q, &id).await
         }
     }

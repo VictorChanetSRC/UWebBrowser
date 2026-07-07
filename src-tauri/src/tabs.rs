@@ -40,7 +40,7 @@ struct TabEvent {
     value: String,
 }
 
-fn emit_tab_event(app: &AppHandle, id: &str, kind: &str, value: String) {
+pub(crate) fn emit_tab_event(app: &AppHandle, id: &str, kind: &str, value: String) {
     let _ = app.emit_to(
         CHROME_LABEL,
         "tab-event",
@@ -200,7 +200,12 @@ pub async fn create_tab(
         }
     }
 
-    window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
+    let webview = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
+    // Native WebView2 wiring Tauri doesn't surface: forward browser keyboard
+    // accelerators to the chrome UI (they'd otherwise die when the page has
+    // focus), detect renderer crashes, enable page zoom, and read the real
+    // favicon. No-op off Windows.
+    crate::webext::install_tab_hooks(&app, &webview, &id);
     // The chrome UI reports its insets asynchronously; if they arrived while
     // this webview was being built, the rect computed above is stale and the
     // page would cover the chrome. Re-position from the current insets.
@@ -236,18 +241,15 @@ pub async fn activate_tab(app: AppHandle, id: Option<String>) -> Result<(), Stri
             continue;
         }
         if Some(&label) == active.as_ref() {
-            // TODO(perf M4): on Windows, Resume() the WebView2 controller here
-            // (via webview.with_webview(|w| w.controller())) before showing, to
-            // wake a tab that was TrySuspend()'d below. See the note on hide().
+            // Wake a tab that was suspended while backgrounded, then show it.
+            crate::webext::resume(&webview);
             webview.show().map_err(|e| e.to_string())?;
         } else {
             let _ = webview.hide();
-            // TODO(perf M4): best-effort TrySuspend() of the native WebView2 to
-            // reclaim memory on a backgrounded tab. Skipped for now: reaching
-            // ICoreWebView2_3::TrySuspend needs webview2-com + the `windows`
-            // crate as direct deps at versions matching Tauri's, which is a
-            // nontrivial dependency add and risks build breakage. Left out per
-            // "do not break the build chasing this."
+            // Free the backgrounded renderer's working set (state is preserved
+            // and restored by resume above). This is what keeps many open tabs
+            // from each pinning a full live renderer, à la Chrome's tab freezing.
+            crate::webext::suspend(&webview);
         }
     }
     Ok(())
@@ -260,6 +262,49 @@ pub async fn tab_eval(app: AppHandle, id: String, js: String) -> Result<(), Stri
         .get_webview(&tab_label(&id))
         .ok_or("tab webview not found")?;
     webview.eval(&js).map_err(|e| e.to_string())
+}
+
+/// Find-in-page. Drives Chromium's built-in `window.find`, which moves the
+/// selection and scrolls the first match into view — a lightweight Ctrl+F with
+/// no extra COM. `forward`/`from_start` let the chrome find bar step matches and
+/// restart the search when the query changes.
+#[tauri::command]
+pub async fn tab_find(
+    app: AppHandle,
+    id: String,
+    query: String,
+    forward: bool,
+    from_start: bool,
+) -> Result<(), String> {
+    let webview = app
+        .get_webview(&tab_label(&id))
+        .ok_or("tab webview not found")?;
+    // JSON-encode the query so quotes/backslashes can't break out of the script.
+    let q = serde_json::to_string(&query).map_err(|e| e.to_string())?;
+    let js = if query.is_empty() {
+        // Clear the highlight when the bar empties.
+        "window.getSelection()?.removeAllRanges();".to_string()
+    } else {
+        format!(
+            "(function(){{try{{\
+               if({from_start})window.getSelection()?.collapseToStart();\
+               window.find({q},false,{back},true,false,false,false);\
+             }}catch(e){{}}}})()",
+            back = if forward { "false" } else { "true" },
+        )
+    };
+    webview.eval(&js).map_err(|e| e.to_string())
+}
+
+/// Set a tab's zoom factor (1.0 == 100%). Used by the toolbar zoom controls;
+/// Ctrl+/Ctrl- while a page is focused are handled natively in `webext`.
+#[tauri::command]
+pub async fn tab_zoom(app: AppHandle, id: String, factor: f64) -> Result<(), String> {
+    let webview = app
+        .get_webview(&tab_label(&id))
+        .ok_or("tab webview not found")?;
+    crate::webext::set_zoom(&webview, factor.clamp(0.25, 5.0));
+    Ok(())
 }
 
 /// The tab's *current* document URL, read live from the engine. Single-page

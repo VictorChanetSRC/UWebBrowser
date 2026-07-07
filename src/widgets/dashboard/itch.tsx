@@ -24,6 +24,7 @@ function ItchBody({ itchApiKey, active, onOpen }: DashBodyProps<ItchWidget>) {
     [key],
     300_000,
     !!key && active,
+    `itch:${key}`,
   );
   const numeric = "font-mono text-[12.5px] tabular-nums text-ink-300";
 

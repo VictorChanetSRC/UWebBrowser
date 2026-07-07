@@ -68,7 +68,11 @@ export function Settings({
       setClearState("done");
       settle(() => setClearState("idle"));
     } catch (error) {
-      setClearError(String(error));
+      // Show a friendly line; keep the raw error in the console for debugging.
+      console.error("clear browsing data failed:", error);
+      setClearError(
+        "Couldn’t clear site data — the web engine may still be closing. Try again in a few seconds.",
+      );
       setClearState("error");
     }
   };

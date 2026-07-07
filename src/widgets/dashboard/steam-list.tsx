@@ -43,6 +43,7 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
     [widget.category],
     1_800_000,
     active,
+    `featured:${widget.category}`,
   );
 
   return (

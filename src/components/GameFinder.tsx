@@ -43,7 +43,7 @@ export function GameFinder({
   onOpen: (url: string) => void;
 }) {
   const [name, setName] = useState("");
-  const { rows, searching, done, foundCount, search, foundPlatforms } =
+  const { rows, searching, done, foundCount, allFailed, search, foundPlatforms } =
     usePlatformCheck();
 
   const buildGame = (): Game => ({
@@ -90,7 +90,9 @@ export function GameFinder({
           <p className="text-ink-400">
             {foundCount > 0
               ? `Live on ${foundCount} of ${PLATFORMS.length} channels.`
-              : "No listings found. Save anyway; the dashboard fills in when your game ships."}
+              : allFailed
+                ? "Couldn’t reach the stores — check your connection and try again."
+                : "No listings found. Save anyway; the dashboard fills in when your game ships."}
           </p>
           <div className="flex gap-2.5">
             <Button variant="primary" onClick={() => onSave(buildGame())}>

@@ -35,6 +35,7 @@ function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamP
     [appid],
     POLL_MS,
     !!appid && active,
+    `players:${appid}`,
   );
 
   const [samples, setSamples] = useState<PlayerSample[]>([]);

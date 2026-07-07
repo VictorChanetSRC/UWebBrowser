@@ -171,7 +171,12 @@ export function History({ onOpen }: Props) {
               />
             </div>
             <Button
-              className="h-[54px] flex-none rounded-xl px-5"
+              className={cn(
+                "h-[54px] flex-none rounded-xl px-5",
+                // Arm state reads as destructive, not just a label swap.
+                confirmingClear &&
+                  "border-signal-600 bg-signal-600/15 text-signal-300 hover:bg-signal-600/25",
+              )}
               disabled={visits.length === 0}
               onClick={handleClear}
             >

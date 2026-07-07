@@ -10,7 +10,11 @@
   --color-ink-800: #1f1f23;
   --color-ink-700: #2c2c32;
   --color-ink-600: #45454d;
-  --color-ink-500: #6e6e77;
+  /* Bumped from #6e6e77 (~3.4:1, fails WCAG AA) to clear 4.5:1 on ink-950/900:
+     this is the dominant colour for secondary text — URL tails, timestamps,
+     hints, the "· Search" affordance — which must be readable. Stays a step
+     below ink-400 so the muted/normal hierarchy holds. */
+  --color-ink-500: #83838c;
   --color-ink-400: #9897a1;
   --color-ink-300: #c5c4cc;
   --color-ink-200: #e4e3e8;
@@ -198,5 +202,13 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+  /* The sliding page-load bar is the only "loading" cue in the toolbar; with
+     its animation neutralized, show a static full-width indeterminate bar so
+     reduced-motion users still see that a page is loading. */
+  .loadbar {
+    width: 100% !important;
+    transform: none !important;
+    opacity: 0.5;
   }
 }

@@ -76,6 +76,7 @@ function NewsBody({ widget, active, onOpen }: DashBodyProps<NewsWidget>) {
     [source.feed],
     900_000,
     active,
+    `feed:${source.feed}`,
   );
 
   return (

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -92,7 +93,16 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
   const [customizing, setCustomizing] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [widgets, setWidgets] = useState<DashWidget[]>(() => loadDashboard(config.games));
-  useEffect(() => saveDashboard(widgets), [widgets]);
+  // Persist debounced: a drag or edge-resize mutates `widgets` many times per
+  // gesture, and each save stringifies the whole layout. Coalesce to a trailing
+  // write, and flush on unmount so switching tabs mid-gesture never loses it.
+  const widgetsRef = useRef(widgets);
+  widgetsRef.current = widgets;
+  useEffect(() => {
+    const t = window.setTimeout(() => saveDashboard(widgetsRef.current), 400);
+    return () => window.clearTimeout(t);
+  }, [widgets]);
+  useEffect(() => () => saveDashboard(widgetsRef.current), []);
 
   const [confirmReset, setConfirmReset] = useState(false);
   const resetTimer = useRef<number | undefined>(undefined);
@@ -111,12 +121,18 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
 
   const setup = !config.done || editing;
 
-  // Computed each render so a window left open past midnight rolls the date.
-  const todayLabel = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
+  // Computed once per mount (not every render, which is frequent during drag).
+  // The dashboard remounts on navigation, so this still rolls past midnight.
+  const greetingText = useMemo(() => greeting(), []);
+  const todayLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }),
+    [],
+  );
 
   /* ------------------------------ drag state ------------------------------ */
 
@@ -215,7 +231,7 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
                 <div>
                   <Label className="mb-2.5 block">Home · {todayLabel}</Label>
                   <h1 className="text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-                    {greeting()}
+                    {greetingText}
                   </h1>
                 </div>
                 <div className="flex gap-2.5">

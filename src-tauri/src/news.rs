@@ -2,18 +2,31 @@
 //! Steam and Epic storefront JSON endpoints. Everything here is read-only
 //! and unauthenticated.
 
+use std::sync::LazyLock;
+use std::time::Duration;
+
 use chrono::DateTime;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::cache::{get_or_fetch, TtlCache};
 use crate::http::{self, err, get_json};
 
 /// Widgets render at most a screenful; don't ship a whole archive across IPC.
 const FEED_CAP: usize = 30;
 
-#[derive(Serialize)]
+// TTL caches: dedupe co-mounted widgets, skip refetch on dashboard remount, and
+// serve last-good on an upstream hiccup. Keyed by feed URL / Steam category.
+static FEEDS: LazyLock<TtlCache<Vec<FeedItem>>> =
+    LazyLock::new(|| TtlCache::new(Duration::from_secs(900)));
+static FEATURED: LazyLock<TtlCache<Value>> =
+    LazyLock::new(|| TtlCache::new(Duration::from_secs(1800)));
+static EPIC: LazyLock<TtlCache<Value>> =
+    LazyLock::new(|| TtlCache::new(Duration::from_secs(1800)));
+
+#[derive(Serialize, Clone)]
 pub struct FeedItem {
     pub(crate) title: String,
     pub(crate) url: String,
@@ -25,16 +38,20 @@ pub struct FeedItem {
 #[tauri::command]
 pub async fn fetch_feed(url: String) -> Result<Vec<FeedItem>, String> {
     http::check_public_url(&url)?;
-    let client = http::shared()?;
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(err)?
-        .error_for_status()
-        .map_err(err)?;
-    let body = http::text_capped(resp).await?;
-    Ok(parse_feed(&body))
+    let key = url.clone();
+    get_or_fetch(&FEEDS, &key, async move {
+        let client = http::shared()?;
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(err)?
+            .error_for_status()
+            .map_err(err)?;
+        let body = http::text_capped(resp).await?;
+        Ok(parse_feed(&body))
+    })
+    .await
 }
 
 /// Which sub-element of the current item we are collecting text for.
@@ -192,7 +209,11 @@ fn decode_entities(s: &str) -> String {
         out.push_str(&rest[..start]);
         rest = &rest[start..];
         // An entity is short; a far-away ';' means this '&' is literal text.
-        if let Some(end) = rest[..rest.len().min(12)].find(';') {
+        // Scan bytes (not a `&str` slice) so a multi-byte char straddling the
+        // 12-byte window can't panic on a non-char-boundary slice — feed titles
+        // carry emoji and accented text, so this path is reachable.
+        let window = rest.len().min(12);
+        if let Some(end) = rest.as_bytes()[..window].iter().position(|&b| b == b';') {
             let entity = &rest[1..end];
             let decoded = match entity {
                 "amp" => Some('&'),
@@ -243,67 +264,84 @@ pub async fn steam_featured(category: String) -> Result<Value, String> {
     if !KNOWN.contains(&category.as_str()) {
         return Err("unknown Steam category".into());
     }
-    let client = http::shared()?;
-    let response = get_json(
-        client,
-        "https://store.steampowered.com/api/featuredcategories?cc=us&l=en",
-    )
-    .await?;
+    let key = category.clone();
+    get_or_fetch(&FEATURED, &key, async move {
+        let client = http::shared()?;
+        let response = get_json(
+            client,
+            "https://store.steampowered.com/api/featuredcategories?cc=us&l=en",
+        )
+        .await?;
 
-    let mut items: Vec<Value> = response[&category]["items"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|item| {
-                    let appid = item["id"].as_u64()?;
-                    Some(json!({
-                        "appid": appid,
-                        "name": item["name"],
-                        "image": item["small_capsule_image"],
-                        "largeImage": item["large_capsule_image"],
-                        "discounted": item["discounted"],
-                        "discountPercent": item["discount_percent"],
-                        "finalPrice": item["final_price"],
-                        "originalPrice": item["original_price"],
-                        "release": Value::Null,
-                    }))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if category == "coming_soon" {
-        // One details call per app, all in flight at once; `filters` keeps the
-        // payload to just the release block. A miss leaves `release` null.
-        let lookups: Vec<_> = items
-            .iter()
-            .filter_map(|item| item["appid"].as_u64())
-            .map(|appid| {
-                tauri::async_runtime::spawn(async move {
-                    let url = format!(
-                        "https://store.steampowered.com/api/appdetails?appids={appid}&cc=us&l=en&filters=release_date"
-                    );
-                    let details = get_json(http::shared().ok()?, &url).await.ok()?;
-                    Some((appid, details[appid.to_string()]["data"]["release_date"]["date"].clone()))
-                })
+        let mut items: Vec<Value> = response[&category]["items"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let appid = item["id"].as_u64()?;
+                        Some(json!({
+                            "appid": appid,
+                            "name": item["name"],
+                            "image": item["small_capsule_image"],
+                            "largeImage": item["large_capsule_image"],
+                            "discounted": item["discounted"],
+                            "discountPercent": item["discount_percent"],
+                            "finalPrice": item["final_price"],
+                            "originalPrice": item["original_price"],
+                            "release": Value::Null,
+                        }))
+                    })
+                    .collect()
             })
-            .collect();
-        for lookup in lookups {
-            if let Ok(Some((appid, date))) = lookup.await {
-                if let Some(item) = items.iter_mut().find(|i| i["appid"] == appid) {
-                    item["release"] = date;
+            .unwrap_or_default();
+
+        if category == "coming_soon" {
+            // One details call per app to fill the release date; `filters` keeps
+            // each payload tiny. Run in bounded batches instead of firing all at
+            // once — `appdetails` is Steam's most rate-limited endpoint, and an
+            // unbounded burst risks a per-IP throttle. A miss leaves it null.
+            const BATCH: usize = 5;
+            let appids: Vec<u64> = items
+                .iter()
+                .filter_map(|item| item["appid"].as_u64())
+                .collect();
+            for chunk in appids.chunks(BATCH) {
+                let lookups: Vec<_> = chunk
+                    .iter()
+                    .copied()
+                    .map(|appid| {
+                        tauri::async_runtime::spawn(async move {
+                            let url = format!(
+                                "https://store.steampowered.com/api/appdetails?appids={appid}&cc=us&l=en&filters=release_date"
+                            );
+                            let details = get_json(http::shared().ok()?, &url).await.ok()?;
+                            Some((appid, details[appid.to_string()]["data"]["release_date"]["date"].clone()))
+                        })
+                    })
+                    .collect();
+                for lookup in lookups {
+                    if let Ok(Some((appid, date))) = lookup.await {
+                        if let Some(item) = items.iter_mut().find(|i| i["appid"] == appid) {
+                            item["release"] = date;
+                        }
+                    }
                 }
             }
         }
-    }
 
-    Ok(json!(items))
+        Ok(json!(items))
+    })
+    .await
 }
 
 /// Epic Games Store giveaway rotation: what's free right now and what's
 /// queued next. Free-now entries sort first, then by start date.
 #[tauri::command]
 pub async fn epic_free_games() -> Result<Value, String> {
+    get_or_fetch(&EPIC, "", epic_free_games_uncached()).await
+}
+
+async fn epic_free_games_uncached() -> Result<Value, String> {
     let client = http::shared()?;
     let response = get_json(
         client,
@@ -484,5 +522,16 @@ mod tests {
     fn literal_ampersands_survive_entity_decode() {
         assert_eq!(decode_entities("Q&A at GDC"), "Q&A at GDC");
         assert_eq!(decode_entities("A &#x27;quoted&#x27; word"), "A 'quoted' word");
+    }
+
+    #[test]
+    fn multibyte_char_across_scan_window_does_not_panic() {
+        // '&' + 10 ASCII puts a 4-byte emoji starting at byte 11, straddling the
+        // 12-byte entity-scan window. The old `&str` slice at byte 12 panicked on
+        // the non-char-boundary; the byte scan must pass it through untouched.
+        let s = "&aaaaaaaaaa\u{1F600} devs";
+        assert_eq!(decode_entities(s), s);
+        // A real entity immediately followed by a multi-byte char still decodes.
+        assert_eq!(decode_entities("&amp;\u{1F600}"), "&\u{1F600}");
     }
 }

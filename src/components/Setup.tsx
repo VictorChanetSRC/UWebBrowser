@@ -58,13 +58,19 @@ export function Setup({
 
   const addGame = () => setDraft((d) => ({ ...d, games: [...d.games, newGame()] }));
 
-  const save = () =>
+  // A game counts once it has a name or a Steam App ID; without at least one,
+  // saving would wire a dashboard to nothing.
+  const canSave = draft.games.some((g) => g.name.trim() || g.steamAppId.trim());
+
+  const save = () => {
+    if (!canSave) return;
     onSave({
       ...draft,
       games: draft.games
         .filter((g) => g.name.trim() || g.steamAppId.trim())
         .map((g) => ({ ...g, name: g.name.trim(), steamAppId: g.steamAppId.trim() })),
     });
+  };
 
   return (
     <div className="flex max-w-[560px] flex-col gap-8">
@@ -113,7 +119,12 @@ export function Setup({
         </label>
 
         <div className="flex gap-2.5 pt-1">
-          <Button variant="primary" onClick={save}>
+          <Button
+            variant="primary"
+            onClick={save}
+            disabled={!canSave}
+            title={canSave ? undefined : "Add a game name or Steam App ID first"}
+          >
             Save setup
           </Button>
           {onCancel && <Button onClick={onCancel}>Cancel</Button>}
@@ -204,7 +215,9 @@ function GameRow({
             <p className="border-t border-border pt-2.5 text-[13px] text-ink-500">
               {check.foundCount > 0
                 ? `Live on ${check.foundCount} of ${PLATFORMS.length} channels. Saved with this game.`
-                : "No listings found. Save anyway; the dashboard fills in when your game ships."}
+                : check.allFailed
+                  ? "Couldn’t reach the stores — check your connection and try again."
+                  : "No listings found. Save anyway; the dashboard fills in when your game ships."}
             </p>
           )}
         </div>

@@ -12,13 +12,28 @@ use crate::unreal::BuildRequest;
 pub const SEV_WARNING: u8 = 1;
 pub const SEV_ERROR: u8 = 2;
 
+/// ASCII case-insensitive substring test that allocates nothing. `needle` must
+/// be lowercase. A large UE build emits hundreds of thousands of log lines, so
+/// avoiding a per-line lowercase `String` matters.
+fn contains_ci(haystack: &str, needle: &[u8]) -> bool {
+    let h = haystack.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if h.len() < needle.len() {
+        return false;
+    }
+    h.windows(needle.len())
+        .any(|w| w.iter().zip(needle).all(|(a, b)| a.eq_ignore_ascii_case(b)))
+}
+
 /// Best-effort severity from UE/UBT/MSVC log conventions: "LogFoo: Error:",
 /// "ERROR:", "error C2065", "fatal error", and the warning equivalents.
 pub fn classify(line: &str) -> u8 {
-    let l = line.to_ascii_lowercase();
-    if l.contains("error:") || l.contains(" error c") || l.contains("fatal error") {
+    if contains_ci(line, b"error:") || contains_ci(line, b" error c") || contains_ci(line, b"fatal error")
+    {
         SEV_ERROR
-    } else if l.contains("warning:") || l.contains(" warning c") {
+    } else if contains_ci(line, b"warning:") || contains_ci(line, b" warning c") {
         SEV_WARNING
     } else {
         0
@@ -227,16 +242,22 @@ pub async fn build_log(
 #[tauri::command]
 pub async fn clear_build_history(app: AppHandle) -> Result<(), String> {
     let dir = builds_dir(&app)?;
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
-        let path = entry.path();
-        if path
-            .extension()
-            .is_some_and(|ext| ext == "json" || ext == "jsonl")
-        {
-            let _ = fs::remove_file(path);
+    // The directory scan + up to 200 file deletions are blocking fs I/O; keep
+    // them off the async worker like the sibling history commands do.
+    tauri::async_runtime::spawn_blocking(move || {
+        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|ext| ext == "json" || ext == "jsonl")
+            {
+                let _ = fs::remove_file(path);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn find_exes(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
@@ -262,54 +283,66 @@ fn find_exes(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
 /// Show a folder in the system file manager.
 #[tauri::command]
 pub async fn reveal_in_explorer(path: String) -> Result<(), String> {
-    if !PathBuf::from(&path).exists() {
-        return Err(format!("{path} doesn't exist — was it moved or deleted?"));
-    }
-    #[cfg(windows)]
-    let mut cmd = Command::new("explorer");
-    #[cfg(target_os = "macos")]
-    let mut cmd = Command::new("open");
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    let mut cmd = Command::new("xdg-open");
-    cmd.arg(&path).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    // `exists()` stats the disk and `spawn` blocks briefly; run off the async
+    // worker.
+    tauri::async_runtime::spawn_blocking(move || {
+        if !PathBuf::from(&path).exists() {
+            return Err(format!("{path} doesn't exist — was it moved or deleted?"));
+        }
+        #[cfg(windows)]
+        let mut cmd = Command::new("explorer");
+        #[cfg(target_os = "macos")]
+        let mut cmd = Command::new("open");
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&path).spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Launch the game from a packaged (archived) build directory: prefer
 /// `<Project>.exe`, otherwise the shallowest exe that isn't engine plumbing.
 #[tauri::command]
 pub async fn launch_packaged(dir: String, project: String) -> Result<String, String> {
-    let root = PathBuf::from(&dir);
-    if !root.is_dir() {
-        return Err(format!("{dir} doesn't exist — was the build moved or deleted?"));
-    }
-    const SKIP: [&str; 4] = [
-        "crashreportclient",
-        "unrealpak",
-        "epicwebhelper",
-        "unrealcefsubprocess",
-    ];
-    let mut exes = Vec::new();
-    find_exes(&root, 0, &mut exes);
-    exes.retain(|p| {
-        p.file_stem()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| !SKIP.contains(&s.to_ascii_lowercase().as_str()))
-    });
-    let target = project.to_ascii_lowercase();
-    exes.sort_by_key(|p| {
-        let stem = p
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        (u32::from(stem != target), p.components().count())
-    });
-    let exe = exes
-        .first()
-        .ok_or("No .exe found in the packaged output.")?;
-    let mut cmd = Command::new(exe);
-    cmd.current_dir(exe.parent().unwrap_or(&root));
-    cmd.spawn().map_err(|e| e.to_string())?;
-    Ok(exe.display().to_string())
+    // The recursive exe walk (up to 200 files, depth 4) plus the process spawn
+    // are blocking; keep them off the async worker threads.
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = PathBuf::from(&dir);
+        if !root.is_dir() {
+            return Err(format!("{dir} doesn't exist — was the build moved or deleted?"));
+        }
+        const SKIP: [&str; 4] = [
+            "crashreportclient",
+            "unrealpak",
+            "epicwebhelper",
+            "unrealcefsubprocess",
+        ];
+        let mut exes = Vec::new();
+        find_exes(&root, 0, &mut exes);
+        exes.retain(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| !SKIP.contains(&s.to_ascii_lowercase().as_str()))
+        });
+        let target = project.to_ascii_lowercase();
+        exes.sort_by_key(|p| {
+            let stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            (u32::from(stem != target), p.components().count())
+        });
+        let exe = exes
+            .first()
+            .ok_or("No .exe found in the packaged output.")?;
+        let mut cmd = Command::new(exe);
+        cmd.current_dir(exe.parent().unwrap_or(&root));
+        cmd.spawn().map_err(|e| e.to_string())?;
+        Ok(exe.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

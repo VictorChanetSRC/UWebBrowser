@@ -21,6 +21,11 @@ export function usePlatformCheck() {
   const foundCount = rows
     ? PLATFORMS.filter((p) => rows[p.key]?.status === "found").length
     : 0;
+  // Every store errored (typically offline) — distinct from "checked, nothing
+  // found", so the UI can say "couldn't reach the stores" instead of lying that
+  // the game doesn't exist anywhere.
+  const allFailed =
+    rows !== null && done && PLATFORMS.every((p) => rows[p.key]?.status === "failed");
 
   const search = (rawQuery: string) => {
     const query = rawQuery.trim();
@@ -55,5 +60,5 @@ export function usePlatformCheck() {
       ]),
     );
 
-  return { rows, searching, done, foundCount, search, foundPlatforms };
+  return { rows, searching, done, foundCount, allFailed, search, foundPlatforms };
 }

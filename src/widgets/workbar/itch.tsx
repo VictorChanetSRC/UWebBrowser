@@ -13,7 +13,13 @@ export type ItchWidget = { id: string; type: "itch" };
 function ItchBody({ itchApiKey, active, onOpen }: BarBodyProps<ItchWidget>) {
   const key = itchApiKey.trim();
   // Aggregate counts move slowly; refresh every 5 minutes.
-  const { data, error } = usePolled(() => ipc.itchGames(key), [key], 300_000, !!key && active);
+  const { data, error } = usePolled(
+    () => ipc.itchGames(key),
+    [key],
+    300_000,
+    !!key && active,
+    `itch:${key}`,
+  );
 
   if (!key) {
     return (

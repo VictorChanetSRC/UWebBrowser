@@ -248,7 +248,7 @@ function TitleBarImpl({
               ) : tab.kind === "home" ? (
                 <span className="size-1.5 flex-none rounded-full bg-ink-500" aria-hidden />
               ) : (
-                <TabFavicon url={tab.url} />
+                <TabFavicon url={tab.url} realSrc={tab.favicon} />
               )}
               <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[12.5px] [mask-image:linear-gradient(to_right,black_calc(100%-12px),transparent)]">
                 {tab.title || "New tab"}
@@ -333,12 +333,21 @@ function TitleBarImpl({
  *  and toast, but the tab strip only cares about tabs/activeId. */
 export const TitleBar = memo(TitleBarImpl);
 
-/** A tab's favicon, falling back to the neutral Ink dot when the favicon
- *  service is blocked/offline or the URL has no host — no broken-image glyph. */
-function TabFavicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  const src = faviconUrl(url);
-  if (failed || !src) {
+/** A tab's favicon, falling back to the neutral Ink dot when the favicon is
+ *  blocked/offline or the URL has no host — no broken-image glyph. Prefers the
+ *  page's real favicon (`realSrc`, captured natively) over the lookup service. */
+function TabFavicon({ url, realSrc }: { url: string; realSrc?: string }) {
+  const service = faviconUrl(url);
+  const [realFailed, setRealFailed] = useState(false);
+  const [serviceFailed, setServiceFailed] = useState(false);
+  // Reset when the URL/favicon changes so a reused slot isn't stuck after a 404.
+  useEffect(() => {
+    setRealFailed(false);
+    setServiceFailed(false);
+  }, [realSrc, url]);
+  const usingReal = !!realSrc && !realFailed;
+  const src = usingReal ? realSrc! : serviceFailed ? "" : service;
+  if (!src) {
     return <span className="size-1.5 flex-none rounded-full bg-ink-500" aria-hidden />;
   }
   return (
@@ -346,7 +355,7 @@ function TabFavicon({ url }: { url: string }) {
       className="size-3.5 flex-none rounded-[3px]"
       src={src}
       alt=""
-      onError={() => setFailed(true)}
+      onError={() => (usingReal ? setRealFailed(true) : setServiceFailed(true))}
     />
   );
 }

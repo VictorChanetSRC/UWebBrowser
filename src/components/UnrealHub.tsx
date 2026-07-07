@@ -982,7 +982,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function MachineSection() {
-  const { data: stats, error } = usePolled(() => ipc.systemStats(), [], 3000);
+  const { data: stats, error } = usePolled(() => ipc.systemStats(), [], 5000, true, "system");
 
   return (
     <DashSection label="Machine">

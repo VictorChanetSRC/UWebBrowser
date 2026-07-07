@@ -10,7 +10,13 @@ import { CardLink, DataCard, FeedRow, RowSkeletons, TileHint } from "./shared";
 export type EpicFreeWidget = { id: string; type: "epicFree"; span: TileSpan };
 
 function EpicFreeBody({ active, onOpen }: DashBodyProps<EpicFreeWidget>) {
-  const { data: games, error } = usePolled(() => ipc.epicFreeGames(), [], 1_800_000, active);
+  const { data: games, error } = usePolled(
+    () => ipc.epicFreeGames(),
+    [],
+    1_800_000,
+    active,
+    "epic",
+  );
 
   return (
     <DataCard

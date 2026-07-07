@@ -19,6 +19,9 @@ struct Monitor {
     sys: System,
     ticks: u64,
     last_temp: Option<f32>,
+    /// Disk topology changes rarely; re-enumerated on the throttled tick and
+    /// reused in between rather than rebuilt from scratch every poll.
+    last_disks: Vec<DiskStats>,
 }
 
 #[derive(Clone)]
@@ -33,6 +36,7 @@ impl Default for MonitorState {
                 sys: System::new(),
                 ticks: 0,
                 last_temp: None,
+                last_disks: Vec::new(),
             })),
         }
     }
@@ -132,23 +136,27 @@ pub async fn system_stats(
         let mem_used = m.sys.used_memory();
         let mem_total = m.sys.total_memory();
 
-        let disks = Disks::new_with_refreshed_list()
-            .iter()
-            .filter(|disk| disk.total_space() > 0)
-            .map(|disk| DiskStats {
-                name: disk.name().to_string_lossy().to_string(),
-                mount: disk.mount_point().to_string_lossy().to_string(),
-                total: disk.total_space(),
-                available: disk.available_space(),
-            })
-            .collect();
-
-        // Thermal comes from WMI and is the costly part; sample it every 3rd
-        // poll and reuse the last reading in between. Built and dropped within
-        // this call so its COM object never crosses threads.
-        let sample_temp = m.ticks % 3 == 0;
+        // Thermal (WMI) and disk enumeration are the costly parts; sample both
+        // every 3rd poll and reuse the last readings in between. The COM handles
+        // are built and dropped within this call so they never cross threads.
+        let heavy_sample = m.ticks % 3 == 0 || m.last_disks.is_empty();
         m.ticks = m.ticks.wrapping_add(1);
-        let cpu_temp_c = if sample_temp {
+
+        if heavy_sample {
+            m.last_disks = Disks::new_with_refreshed_list()
+                .iter()
+                .filter(|disk| disk.total_space() > 0)
+                .map(|disk| DiskStats {
+                    name: disk.name().to_string_lossy().to_string(),
+                    mount: disk.mount_point().to_string_lossy().to_string(),
+                    total: disk.total_space(),
+                    available: disk.available_space(),
+                })
+                .collect();
+        }
+        let disks = m.last_disks.clone();
+
+        let cpu_temp_c = if heavy_sample {
             let temp = cpu_temp(&Components::new_with_refreshed_list());
             m.last_temp = temp;
             temp

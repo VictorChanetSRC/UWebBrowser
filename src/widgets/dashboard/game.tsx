@@ -36,6 +36,7 @@ function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<
     [appid],
     60_000,
     !!appid && active,
+    `game:${appid}`,
   );
 
   // A build in flight owns the one Signal pulse; mute the players dot to match.

@@ -1,3 +1,4 @@
+mod cache;
 mod default_browser;
 pub mod discovery;
 mod extensions;
@@ -10,6 +11,7 @@ mod sysmon;
 mod tabs;
 mod terminal;
 mod unreal;
+mod webext;
 
 use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
 
@@ -43,6 +45,8 @@ pub fn run() {
             tabs::close_tab,
             tabs::activate_tab,
             tabs::tab_eval,
+            tabs::tab_find,
+            tabs::tab_zoom,
             tabs::tab_live_url,
             tabs::set_content_insets,
             tabs::clear_browsing_data,

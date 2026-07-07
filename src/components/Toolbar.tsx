@@ -151,7 +151,9 @@ function ToolbarImpl(props: Props) {
     setTimeout(() => setCopied(false), 1400);
   };
 
-  const parsed = parseUrl(tab.url);
+  // Parsing runs on every render; the 700ms live-URL poll feeds an unchanged
+  // string most ticks, so memoize on the URL.
+  const parsed = useMemo(() => parseUrl(tab.url), [tab.url]);
   const secure = tab.kind === "web" && parsed?.protocol === "https:";
   const insecure = tab.kind === "web" && parsed?.protocol === "http:";
   // The formatted URL is shown until the user clicks in; then the raw
@@ -265,12 +267,20 @@ function ToolbarImpl(props: Props) {
         ) : (
           <button
             type="button"
-            className="flex h-full min-w-0 flex-1 cursor-text items-center overflow-hidden whitespace-nowrap text-left font-mono text-[12.5px] focus-visible:outline-none"
+            className="flex h-full min-w-0 flex-1 cursor-text items-center overflow-hidden whitespace-nowrap rounded text-left font-mono text-[12.5px]"
             onMouseDown={(e) => {
               e.preventDefault();
               setEditing(true);
             }}
-            aria-label="Edit address"
+            onKeyDown={(e) => {
+              // Keyboard users land here via Tab; Enter/Space opens edit mode
+              // (matching the mouse) instead of doing nothing.
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setEditing(true);
+              }
+            }}
+            aria-label={`Edit address${insecure ? ", current page is not secure" : secure ? ", current page is secure" : ""}`}
           >
             <span className="flex-none text-ink-200">{parsed!.hostname}</span>
             <span className="min-w-0 overflow-hidden text-ellipsis text-ink-500">{pathOf(parsed!)}</span>
@@ -388,9 +398,19 @@ function ToolbarImpl(props: Props) {
       {tab.loading && (
         /* The one Signal moment while browsing: page load in flight. */
         <div className="pointer-events-none absolute inset-x-0 -bottom-px z-[2] h-0.5 overflow-hidden" aria-hidden>
-          <span className="block h-full w-[36%] animate-loadslide rounded-sm bg-signal-500" />
+          <span className="loadbar block h-full w-[36%] animate-loadslide rounded-sm bg-signal-500" />
         </div>
       )}
+
+      {/* Screen-reader announcement of load + security state — the visual
+          loading bar and lock/"Not secure" glyphs are aria-hidden. */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {tab.kind === "web"
+          ? tab.loading
+            ? `Loading ${parsed?.hostname ?? tab.title}`
+            : `${tab.title || parsed?.hostname || "Page"} loaded${insecure ? ", not secure" : secure ? ", secure connection" : ""}`
+          : ""}
+      </span>
     </div>
   );
 }
@@ -419,7 +439,7 @@ function pathOf(url: URL): string {
  * GitHub is unreachable) it's just the star glyph — never a broken number.
  */
 function GithubStars({ onClick }: { onClick: () => void }) {
-  const { data: stats } = usePolled(() => ipc.githubRepoStats(), [], 900_000);
+  const { data: stats } = usePolled(() => ipc.githubRepoStats(), [], 900_000, true, "github_stats");
   return (
     <Button
       variant="ghost"

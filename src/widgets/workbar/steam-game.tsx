@@ -24,6 +24,7 @@ function SteamGameBody({ widget, games, active, onOpen }: BarBodyProps<SteamGame
     [appid],
     300_000,
     !!appid && active,
+    `game:${appid}`,
   );
 
   const positive =

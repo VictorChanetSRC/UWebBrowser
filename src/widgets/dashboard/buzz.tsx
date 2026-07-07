@@ -33,6 +33,7 @@ function BuzzBody({ widget, games, active, onOpen }: DashBodyProps<BuzzWidget>) 
     [name],
     300_000,
     !!name && active,
+    `buzz:${name}`,
   );
 
   return (
