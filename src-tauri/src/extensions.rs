@@ -726,6 +726,8 @@ pub async fn ext_open_popup(
     // popup stays blank (it only appeared to work in dev because the extra
     // queued open_devtools message shifted the timing). This callback fires on
     // the main thread once about:blank is live, so its navigate always lands.
+    let w = width.max(120.0);
+    let h = height.max(120.0);
     let nav_target = parsed.clone();
     let app_new = app.clone();
     let mut builder =
@@ -733,10 +735,29 @@ pub async fn ext_open_popup(
             .browser_extensions_enabled(true)
             .disable_drag_drop_handler()
             .on_page_load(move |webview, payload| {
-                if matches!(payload.event(), PageLoadEvent::Finished)
-                    && payload.url().scheme() == "about"
-                {
-                    let _ = webview.navigate(nav_target.clone());
+                if !matches!(payload.event(), PageLoadEvent::Finished) {
+                    return;
+                }
+                match payload.url().scheme() {
+                    // about:blank finished → redo the navigation to the real
+                    // popup now that a post-creation navigate resolves.
+                    "about" => {
+                        let _ = webview.navigate(nav_target.clone());
+                    }
+                    // The extension page itself finished loading. A freshly
+                    // created child webview can stay blank in release builds
+                    // until it receives a size change, and the only reliable
+                    // moment to force that first paint is *after* real content
+                    // is present — an earlier jiggle just paints the white
+                    // about:blank frame and the popup content never repaints
+                    // (in dev, open_devtools masked this by forcing relayouts).
+                    // Jiggle with a delta, not the identical value, or WebView2
+                    // skips the resize.
+                    "chrome-extension" => {
+                        let _ = webview.set_size(LogicalSize::new(w, h - 1.0));
+                        let _ = webview.set_size(LogicalSize::new(w, h));
+                    }
+                    _ => {}
                 }
             })
             // The popup's "sign in" buttons open the auth page via
@@ -758,8 +779,6 @@ pub async fn ext_open_popup(
         builder = builder.extensions_path(dir);
     }
 
-    let w = width.max(120.0);
-    let h = height.max(120.0);
     let popup_view = window
         .add_child(
             builder,
@@ -768,15 +787,10 @@ pub async fn ext_open_popup(
         )
         .map_err(|e| e.to_string())?;
     // Fast path: usually lands immediately. The on_page_load handler above is
-    // the reliability net for when this queued navigate loses the race.
+    // the reliability net for when this queued navigate loses the race, and it
+    // also owns the paint-forcing size jiggle (fired once the extension page
+    // itself finishes loading — see the `chrome-extension` arm above).
     popup_view.navigate(parsed).map_err(|e| e.to_string())?;
-    // A freshly-created child webview can stay blank in release builds until it
-    // receives a size change — tab webviews get one from `apply_bounds_to_all`
-    // right after creation, but the popup never did, so it only painted in dev
-    // where `open_devtools` forced a relayout. Jiggle the size (a delta, not the
-    // identical value, or WebView2 skips it) to force the first paint.
-    let _ = popup_view.set_size(LogicalSize::new(w, h - 1.0));
-    let _ = popup_view.set_size(LogicalSize::new(w, h));
     // Dev-only: surface the popup's console so a blank extension page (usually a
     // service-worker/`chrome.runtime` failure) can be diagnosed.
     #[cfg(debug_assertions)]
