@@ -746,16 +746,15 @@ pub async fn ext_open_popup(
                     }
                     // The extension page itself finished loading. A freshly
                     // created child webview can stay blank in release builds
-                    // until it receives a size change, and the only reliable
+                    // until its controller bounds change, and the only reliable
                     // moment to force that first paint is *after* real content
-                    // is present — an earlier jiggle just paints the white
+                    // is present — nudging earlier just paints the white
                     // about:blank frame and the popup content never repaints
                     // (in dev, open_devtools masked this by forcing relayouts).
-                    // Jiggle with a delta, not the identical value, or WebView2
-                    // skips the resize.
+                    // Done natively (SetBounds ×2 on the UI thread); a Tauri
+                    // set_size jiggle coalesces to no net change and is skipped.
                     "chrome-extension" => {
-                        let _ = webview.set_size(LogicalSize::new(w, h - 1.0));
-                        let _ = webview.set_size(LogicalSize::new(w, h));
+                        crate::webext::force_repaint(&webview);
                     }
                     _ => {}
                 }

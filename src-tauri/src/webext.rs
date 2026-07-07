@@ -37,6 +37,20 @@ pub fn set_zoom(webview: &Webview, factor: f64) {
     });
 }
 
+/// Force a first paint on a freshly-created child webview that WebView2 leaves
+/// blank until its controller bounds actually change. Nudges the *native*
+/// controller bounds by 1px and back, synchronously on the UI thread — going
+/// through Tauri's `set_size` instead coalesces the two calls into no net
+/// change, so WebView2 skips the resize and never repaints (this is why the
+/// extension popup stayed white in release). No-op off Windows.
+#[cfg(windows)]
+pub fn force_repaint(webview: &Webview) {
+    let _ = webview.with_webview(|pw| unsafe { imp::force_repaint(&pw) });
+}
+
+#[cfg(not(windows))]
+pub fn force_repaint(_webview: &Webview) {}
+
 #[cfg(not(windows))]
 pub fn set_zoom(_webview: &Webview, _factor: f64) {}
 
@@ -77,6 +91,7 @@ mod imp {
         TrySuspendCompletedHandler,
     };
     use windows::core::Interface;
+    use windows::Win32::Foundation::RECT;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
     };
@@ -91,6 +106,22 @@ mod imp {
     /// modifiers held for *this* keystroke.
     unsafe fn down(vk: u16) -> bool {
         (GetKeyState(vk as i32) as u16 & 0x8000) != 0
+    }
+
+    pub unsafe fn force_repaint(pw: &PlatformWebview) {
+        let controller = pw.controller();
+        let mut bounds = RECT::default();
+        if controller.Bounds(&mut bounds).is_err() {
+            return;
+        }
+        // Two distinct, synchronous SetBounds calls: the intermediate (1px
+        // shorter) rect makes WebView2 register a genuine size change and
+        // paint, then we restore the real rect. Both run on the UI thread
+        // inside this callback, so neither can be coalesced away.
+        let mut nudged = bounds;
+        nudged.bottom -= 1;
+        let _ = controller.SetBounds(nudged);
+        let _ = controller.SetBounds(bounds);
     }
 
     pub unsafe fn suspend(pw: &PlatformWebview) {
