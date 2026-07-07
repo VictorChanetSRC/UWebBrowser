@@ -33,6 +33,27 @@ export function gb(bytes: number): number {
   return bytes / 1024 ** 3;
 }
 
+/** Human byte size — "0 B", "934 KB", "1.4 MB", "2.1 GB". Rounds to one
+ *  decimal from MB up. Negative/unknown sizes render as {@link MISSING}. */
+export function fmtBytes(bytes: number): string {
+  if (bytes < 0 || Number.isNaN(bytes)) return MISSING;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = unit === 0 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded} ${units[unit]}`;
+}
+
+/** Bytes-per-second as "1.2 MB/s". */
+export function fmtSpeed(bytesPerSec: number): string {
+  return `${fmtBytes(bytesPerSec)}/s`;
+}
+
 /** Relative "n min/h/d ago" for a unix-seconds timestamp. */
 export function ago(utcSeconds: number): string {
   const seconds = Math.max(0, Date.now() / 1000 - utcSeconds);

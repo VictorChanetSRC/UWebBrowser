@@ -74,26 +74,100 @@ pub fn resume(webview: &Webview) {
 #[cfg(not(windows))]
 pub fn resume(_webview: &Webview) {}
 
+/// Open the native Chromium DevTools window for a tab webview — the real
+/// Elements/Console/Network/Sources inspector, same as Chrome. Opens as its own
+/// OS window (WebView2 has no docked mode). No-op off Windows.
+#[cfg(windows)]
+pub fn open_devtools(webview: &Webview) {
+    let _ = webview.with_webview(|pw| unsafe { imp::open_devtools(&pw) });
+}
+
+#[cfg(not(windows))]
+pub fn open_devtools(_webview: &Webview) {}
+
+/// Cancel an in-progress download by its id. The WebView2 download operation has
+/// thread affinity to the UI thread where it was created, so the cancel is
+/// marshaled there (commands run on an async worker). No-op off Windows.
+#[cfg(windows)]
+pub fn cancel_download(app: &AppHandle, id: String) {
+    let _ = app.run_on_main_thread(move || imp::cancel_download(&id));
+}
+
+#[cfg(not(windows))]
+pub fn cancel_download(_app: &AppHandle, _id: String) {}
+
 #[cfg(windows)]
 mod imp {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tauri::webview::PlatformWebview;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2Controller,
-        ICoreWebView2DownloadOperation, ICoreWebView2_15, ICoreWebView2_3, ICoreWebView2_4,
-        COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED,
-        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+        ICoreWebView2Controller, ICoreWebView2DownloadOperation, ICoreWebView2_15,
+        ICoreWebView2_3, ICoreWebView2_4,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED, COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED,
+        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
     };
     use webview2_com::{
-        AcceleratorKeyPressedEventHandler, DownloadStartingEventHandler,
-        FaviconChangedEventHandler, ProcessFailedEventHandler, StateChangedEventHandler,
-        TrySuspendCompletedHandler,
+        AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler,
+        DownloadStartingEventHandler, FaviconChangedEventHandler, ProcessFailedEventHandler,
+        StateChangedEventHandler, TrySuspendCompletedHandler,
     };
-    use windows::core::Interface;
+    use windows::core::{Interface, PWSTR};
     use windows::Win32::Foundation::RECT;
+    use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
     };
+
+    thread_local! {
+        /// Live download operations keyed by our download id, so a later
+        /// `download_cancel` command can reach the right one. Only ever touched
+        /// on the UI thread (where the events fire and `cancel_download` is
+        /// marshaled), so a plain thread-local `RefCell` is sound — the COM
+        /// interface pointers are not `Send`. Entries are removed when the
+        /// download reaches a terminal state.
+        static DOWNLOADS: RefCell<HashMap<String, ICoreWebView2DownloadOperation>> =
+            RefCell::new(HashMap::new());
+    }
+
+    /// Monotonic source of per-download ids (`dl1`, `dl2`, …). A counter, not a
+    /// clock/random, so it's deterministic and needs no extra deps.
+    static NEXT_DL_ID: AtomicU64 = AtomicU64::new(1);
+
+    pub unsafe fn open_devtools(pw: &PlatformWebview) {
+        if let Ok(core) = pw.controller().CoreWebView2() {
+            let _ = core.OpenDevToolsWindow();
+        }
+    }
+
+    pub fn cancel_download(id: &str) {
+        DOWNLOADS.with(|m| {
+            if let Some(op) = m.borrow().get(id) {
+                unsafe {
+                    let _ = op.Cancel();
+                }
+            }
+        });
+    }
+
+    /// Read a WebView2 `PWSTR`-out getter into an owned `String`, freeing the
+    /// COM-allocated buffer. Empty string on failure/null.
+    unsafe fn read_pwstr(
+        get: impl FnOnce(&mut PWSTR) -> windows::core::Result<()>,
+    ) -> String {
+        let mut ptr = PWSTR::null();
+        if get(&mut ptr).is_ok() && !ptr.is_null() {
+            let s = ptr.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(ptr.0 as *const _));
+            s
+        } else {
+            String::new()
+        }
+    }
 
     // Zoom steps, matching Chrome's ladder loosely; clamped to a sane range.
     const ZOOM_MIN: f64 = 0.25;
@@ -156,16 +230,39 @@ mod imp {
         }
     }
 
-    /// A `download` tab-event. `state` is "start" | "done" | "fail"; `name` is
-    /// the file's basename and `path` its on-disk location, JSON-encoded into the
-    /// event value so the chrome UI can toast progress and offer "show in folder".
-    fn emit_download(app: &AppHandle, id: &str, state: &str, path: &str) {
-        let name = std::path::Path::new(path)
+    /// Emit a `download` tab-event carrying the operation's full live state as
+    /// JSON: our `id`, the `state` ("start" | "progress" | "done" | "fail" |
+    /// "cancel"), the file `name`/`path`, the source `url`, and byte counts
+    /// (`received`/`total`; total is -1 when the server sent no length). The
+    /// chrome UI keys its downloads panel + top-bar progress ring off this.
+    unsafe fn emit_download(
+        app: &AppHandle,
+        tab_id: &str,
+        dl_id: &str,
+        state: &str,
+        op: &ICoreWebView2DownloadOperation,
+    ) {
+        let path = read_pwstr(|p| op.ResultFilePath(p));
+        let url = read_pwstr(|p| op.Uri(p));
+        let mut received = 0i64;
+        let _ = op.BytesReceived(&mut received);
+        let mut total = 0i64;
+        let _ = op.TotalBytesToReceive(&mut total);
+        let name = std::path::Path::new(&path)
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or(path);
-        let value = serde_json::json!({ "state": state, "name": name, "path": path }).to_string();
-        crate::tabs::emit_tab_event(app, id, "download", value);
+            .unwrap_or(&path);
+        let value = serde_json::json!({
+            "id": dl_id,
+            "state": state,
+            "name": name,
+            "path": path,
+            "url": url,
+            "received": received,
+            "total": total,
+        })
+        .to_string();
+        crate::tabs::emit_tab_event(app, tab_id, "download", value);
     }
 
     unsafe fn install_downloads(
@@ -178,30 +275,41 @@ mod imp {
             return;
         };
         let app = app.clone();
-        let id = id.to_string();
+        let tab_id = id.to_string();
         let handler = DownloadStartingEventHandler::create(Box::new(move |_sender, args| {
             let Some(args) = args else { return Ok(()) };
             if let Ok(op) = args.DownloadOperation() {
-                let mut path = windows::core::PWSTR::null();
-                let start_path = if op.ResultFilePath(&mut path).is_ok() && !path.is_null() {
-                    let s = path.to_string().unwrap_or_default();
-                    windows::Win32::System::Com::CoTaskMemFree(Some(path.0 as *const _));
-                    s
-                } else {
-                    String::new()
-                };
-                emit_download(&app, &id, "start", &start_path);
-                // Watch the operation to a terminal state for the completion toast.
-                let app2 = app.clone();
-                let id2 = id.clone();
-                let on_state = StateChangedEventHandler::create(Box::new(move |sender, _| {
+                let dl_id = format!("dl{}", NEXT_DL_ID.fetch_add(1, Ordering::Relaxed));
+                // Register the operation so a later cancel can reach it.
+                DOWNLOADS.with(|m| m.borrow_mut().insert(dl_id.clone(), op.clone()));
+                emit_download(&app, &tab_id, &dl_id, "start", &op);
+
+                // Stream progress: BytesReceivedChanged fires as bytes land, so
+                // the panel's per-item bar and the top-bar ring track live.
+                let app_p = app.clone();
+                let tab_p = tab_id.clone();
+                let dl_p = dl_id.clone();
+                let on_bytes = BytesReceivedChangedEventHandler::create(Box::new(move |sender, _| {
                     if let Some(op) = sender.as_ref() {
-                        report_state(&app2, &id2, op);
+                        emit_download(&app_p, &tab_p, &dl_p, "progress", op);
                     }
                     Ok(())
                 }));
-                let mut token = 0i64;
-                let _ = op.add_StateChanged(&on_state, &mut token);
+                let mut t_bytes = 0i64;
+                let _ = op.add_BytesReceivedChanged(&on_bytes, &mut t_bytes);
+
+                // Watch to a terminal state (done / fail / user-cancel).
+                let app_s = app.clone();
+                let tab_s = tab_id.clone();
+                let dl_s = dl_id.clone();
+                let on_state = StateChangedEventHandler::create(Box::new(move |sender, _| {
+                    if let Some(op) = sender.as_ref() {
+                        report_state(&app_s, &tab_s, &dl_s, op);
+                    }
+                    Ok(())
+                }));
+                let mut t_state = 0i64;
+                let _ = op.add_StateChanged(&on_state, &mut t_state);
             }
             // Suppress WebView2's own download flyout; the download still proceeds
             // to ResultFilePath and we surface it in the chrome UI instead.
@@ -212,25 +320,34 @@ mod imp {
         let _ = core4.add_DownloadStarting(&handler, &mut token);
     }
 
-    unsafe fn report_state(app: &AppHandle, id: &str, op: &ICoreWebView2DownloadOperation) {
+    unsafe fn report_state(
+        app: &AppHandle,
+        tab_id: &str,
+        dl_id: &str,
+        op: &ICoreWebView2DownloadOperation,
+    ) {
         let mut state = COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED;
         let _ = op.State(&mut state);
         let terminal = if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
             "done"
         } else if state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
-            "fail"
+            // Separate a deliberate cancel from a genuine failure so the UI can
+            // label them differently.
+            let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+            let _ = op.InterruptReason(&mut reason);
+            if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED {
+                "cancel"
+            } else {
+                "fail"
+            }
         } else {
             return; // still in progress
         };
-        let mut path = windows::core::PWSTR::null();
-        let p = if op.ResultFilePath(&mut path).is_ok() && !path.is_null() {
-            let s = path.to_string().unwrap_or_default();
-            windows::Win32::System::Com::CoTaskMemFree(Some(path.0 as *const _));
-            s
-        } else {
-            String::new()
-        };
-        emit_download(app, id, terminal, &p);
+        emit_download(app, tab_id, dl_id, terminal, op);
+        // Done with this operation; drop it from the cancel registry.
+        DOWNLOADS.with(|m| {
+            m.borrow_mut().remove(dl_id);
+        });
     }
 
     unsafe fn install_accelerators(app: &AppHandle, id: &str, controller: &ICoreWebView2Controller) {
@@ -319,15 +436,19 @@ mod imp {
                 _ => None,
             };
         }
-        // F5: reload (no modifiers required).
+        // F5: reload, F12: developer tools (no modifiers required).
         if vk == 0x74 && !ctrl && !alt {
             return Some("reload");
+        }
+        if vk == 0x7B && !ctrl && !alt {
+            return Some("devtools"); // VK_F12
         }
         if !ctrl || alt {
             return None;
         }
         // Ctrl (optionally +Shift) chords.
         match vk {
+            0x49 if shift => Some("devtools"),                        // Ctrl+Shift+I
             0x09 => Some(if shift { "prev-tab" } else { "next-tab" }), // Tab
             0x54 => Some(if shift { "reopen-tab" } else { "new-tab" }), // T
             0x57 => Some("close-tab"),                                  // W

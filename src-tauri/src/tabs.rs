@@ -159,8 +159,20 @@ pub async fn create_tab(
             emit_tab_event(&app_title, &id_title, "title", title);
         })
         .on_navigation(move |url| {
-            emit_tab_event(&app_nav, &id_nav, "url", url.to_string());
-            true
+            // Only real navigable schemes may drive the top frame — the same
+            // policy as `check_scheme`. This stops a page from stranding the
+            // tab on a blank white page: the "open a blank window, then set its
+            // location" popup pattern (which we can't fully honour, since a
+            // denied window.open() returns null) otherwise leaves the frame at
+            // about:blank, and data:/javascript: top-frame loads are a phishing
+            // vector Chrome blocks too. Main-frame only — iframes (ads,
+            // sandboxes) fire a different WebView2 event and are unaffected, so
+            // the countless legitimate about:blank iframes still load.
+            let ok = matches!(url.scheme(), "http" | "https" | "file" | "uwb");
+            if ok {
+                emit_tab_event(&app_nav, &id_nav, "url", url.to_string());
+            }
+            ok
         })
         // window.open() / target="_blank" raise NewWindowRequested instead of
         // navigating; without a handler the engine silently drops the request.
@@ -294,6 +306,18 @@ pub async fn tab_find(
         )
     };
     webview.eval(&js).map_err(|e| e.to_string())
+}
+
+/// Open the native Chromium DevTools window for a tab (Elements, Console,
+/// Network, Sources — the real inspector). Driven by the toolbar button, F12
+/// and Ctrl+Shift+I.
+#[tauri::command]
+pub async fn tab_devtools(app: AppHandle, id: String) -> Result<(), String> {
+    let webview = app
+        .get_webview(&tab_label(&id))
+        .ok_or("tab webview not found")?;
+    crate::webext::open_devtools(&webview);
+    Ok(())
 }
 
 /// Set a tab's zoom factor (1.0 == 100%). Used by the toolbar zoom controls;

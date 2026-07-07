@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Code2,
   Compass,
   Copy,
   Download,
@@ -27,6 +28,7 @@ import type { SearchEngine } from "../lib/settings";
 import { Favicon } from "@/components/ui/favicon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
+import { Downloads } from "@/components/Downloads";
 import { usePolled } from "@/hooks/use-polled";
 import { fmtNumber } from "@/lib/format";
 import { ipc } from "@/lib/ipc";
@@ -53,6 +55,11 @@ type Props = {
   onSettings: () => void;
   onTogglePin: () => void;
   onSuggestionsOpen: (open: boolean) => void;
+  /** Open the native DevTools for the active web tab. */
+  onDevtools: () => void;
+  /** The downloads panel opened/closed; the app hides the page webview while
+   *  it's open so the dropdown isn't painted over. */
+  onDownloadsPanelOpen: (open: boolean) => void;
   /** Opens the UWebBrowser repo — the toolbar's standing ask for a star. */
   onGithub: () => void;
   /** Install the extension the current Web Store page is showing. */
@@ -389,7 +396,17 @@ function ToolbarImpl(props: Props) {
         </Button>
       )}
 
+      <Downloads onPanelOpenChange={props.onDownloadsPanelOpen} />
+
       <GithubStars onClick={props.onGithub} />
+
+      <IconButton
+        label="Developer tools · F12"
+        onClick={props.onDevtools}
+        disabled={tab.kind !== "web"}
+      >
+        <Code2 aria-hidden />
+      </IconButton>
 
       <IconButton label="Settings · Ctrl+," onClick={props.onSettings}>
         <SettingsIcon aria-hidden />

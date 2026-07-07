@@ -17,7 +17,6 @@ import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
 import { FindBar } from "./components/FindBar";
-import { DownloadShelf, type DownloadItem } from "./components/DownloadShelf";
 import { Button } from "./components/ui/button";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
@@ -167,7 +166,10 @@ export default function App() {
     () => localStorage.getItem("uwb.extBar") === "1",
   );
   const [findOpen, setFindOpen] = useState(false);
-  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  // The downloads panel drops into the content area; while it's open the active
+  // page's webview is hidden so the dropdown isn't painted over (same as the
+  // omnibox). Downloads state itself lives inside the self-contained component.
+  const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
   const closedUrls = useRef<string[]>([]);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
@@ -356,12 +358,8 @@ export default function App() {
         return;
       }
       if (kind === "download") {
-        try {
-          const d = JSON.parse(value) as DownloadItem;
-          setDownloads((prev) => [...prev.filter((x) => x.path !== d.path), d].slice(-4));
-        } catch {
-          /* ignore malformed payloads */
-        }
+        // Handled entirely by the self-contained <Downloads> component, which
+        // keeps its own listener; nothing to do here.
         return;
       }
       if (kind === "crashed") {
@@ -453,13 +451,13 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  // The native tab webview paints over any chrome overlay, so hide it while
-  // the omnibox suggestions are showing.
+  // The native tab webview paints over any chrome overlay, so hide it while the
+  // omnibox suggestions or the downloads panel are showing.
   useEffect(() => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
     if (tab?.kind !== "web") return;
-    ipc.activateTab(omniboxOpen ? null : tab.id).catch(() => {});
-  }, [omniboxOpen]);
+    ipc.activateTab(omniboxOpen || downloadsPanelOpen ? null : tab.id).catch(() => {});
+  }, [omniboxOpen, downloadsPanelOpen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -710,6 +708,8 @@ export default function App() {
   const onForward = useCallback(() => withWebTab((id) => ipc.goForward(id)), [withWebTab]);
   const onReload = useCallback(() => withWebTab((id) => ipc.reload(id)), [withWebTab]);
   const onStop = useCallback(() => withWebTab((id) => ipc.stop(id)), [withWebTab]);
+  const onDevtools = useCallback(() => withWebTab((id) => ipc.tabDevtools(id)), [withWebTab]);
+  const onDownloadsPanelOpen = useCallback((open: boolean) => setDownloadsPanelOpen(open), []);
   const onTogglePin = useCallback(() => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
     if (tab?.kind === "web") {
@@ -755,6 +755,9 @@ export default function App() {
           break;
         case "reload":
           withWebTab((id) => ipc.reload(id));
+          break;
+        case "devtools":
+          withWebTab((id) => ipc.tabDevtools(id));
           break;
         case "back":
           withWebTab((id) => ipc.goBack(id));
@@ -804,7 +807,10 @@ export default function App() {
         return null;
       }
       if (e.key === "F5") return "reload";
+      if (e.key === "F12") return "devtools";
       if (!e.ctrlKey && !e.metaKey) return null;
+      // Ctrl+Shift+I — DevTools (checked before the lowercased single-key chords).
+      if (e.shiftKey && e.key.toLowerCase() === "i") return "devtools";
       if (e.key === "Tab") return e.shiftKey ? "prev-tab" : "next-tab";
       if (e.key >= "1" && e.key <= "9") return `tab-${e.key}`;
       const key = e.key.toLowerCase();
@@ -894,6 +900,8 @@ export default function App() {
         onSettings={goSettings}
         onTogglePin={onTogglePin}
         onSuggestionsOpen={setOmniboxOpen}
+        onDevtools={onDevtools}
+        onDownloadsPanelOpen={onDownloadsPanelOpen}
         onGithub={goGithub}
         onInstallExtension={installExtensionFromStore}
       />
@@ -1043,13 +1051,6 @@ export default function App() {
             ))}
 
           {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
-
-          <DownloadShelf
-            items={downloads}
-            onDismiss={(path) =>
-              setDownloads((prev) => prev.filter((d) => d.path !== path))
-            }
-          />
 
           {/* Always-mounted live region so the toast is announced when it
               appears; the inner node carries the entrance animation. */}

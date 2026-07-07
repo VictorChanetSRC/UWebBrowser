@@ -11,7 +11,9 @@ export type TabEventPayload = {
    *  - "zoom": the page zoom changed natively; `value` is the percent.
    *  - "crashed": the tab's renderer process died (show a reload panel).
    *  - "favicon": the page's real favicon URL.
-   *  - "download": JSON `{ state: "start"|"done"|"fail", name, path }`. */
+   *  - "download": JSON `{ id, state: "start"|"progress"|"done"|"fail"|
+   *    "cancel", name, path, url, received, total }` — `total` is -1 when the
+   *    server sent no content length. */
   kind:
     | "title"
     | "url"
@@ -61,9 +63,17 @@ export const ipc = {
     invoke("tab_find", { id, query, forward, fromStart }),
   /** Set a tab's zoom factor (1.0 == 100%). */
   tabZoom: (id: string, factor: number) => invoke("tab_zoom", { id, factor }),
+  /** Open the native Chromium DevTools window for a tab. */
+  tabDevtools: (id: string) => invoke("tab_devtools", { id }),
   /** The tab's live document URL — tracks History-API (SPA) navigations that
    *  fire no page-load event. */
   tabLiveUrl: (id: string) => invoke<string>("tab_live_url", { id }),
+  /** Cancel an in-progress download by its id. */
+  downloadCancel: (id: string) => invoke("download_cancel", { id }),
+  /** Open a finished download with its default application. */
+  downloadOpen: (path: string) => invoke("download_open", { path }),
+  /** Reveal a finished download in the file manager, selected. */
+  downloadShow: (path: string) => invoke("download_show", { path }),
   setContentInsets: (top: number, left: number, right: number) =>
     invoke("set_content_insets", { top, left, right }),
   clearBrowsingData: () => invoke("clear_browsing_data"),

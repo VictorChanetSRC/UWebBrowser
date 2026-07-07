@@ -1,6 +1,7 @@
 mod cache;
 mod default_browser;
 pub mod discovery;
+mod downloads;
 mod extensions;
 mod github;
 mod history;
@@ -47,9 +48,13 @@ pub fn run() {
             tabs::tab_eval,
             tabs::tab_find,
             tabs::tab_zoom,
+            tabs::tab_devtools,
             tabs::tab_live_url,
             tabs::set_content_insets,
             tabs::clear_browsing_data,
+            downloads::download_cancel,
+            downloads::download_open,
+            downloads::download_show,
             extensions::ext_list,
             extensions::ext_import,
             extensions::ext_install_from_store,
