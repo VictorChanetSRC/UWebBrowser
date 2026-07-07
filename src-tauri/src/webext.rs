@@ -37,23 +37,18 @@ pub fn set_zoom(webview: &Webview, factor: f64) {
     });
 }
 
-/// Navigate a freshly-created extension-popup child webview to its
-/// `chrome-extension://` page the reliable way: natively, once CoreWebView2 is
-/// initialized. Driving this through wry — or navigating eagerly right after
-/// `add_child` — races the engine's own about:blank init; WebView2 then treats
-/// the chrome-extension URL like an initial source, rejects it, and falls back
-/// to its new-tab page (chrome-search://local-ntp, which itself errors with
-/// ERR_INVALID_URL). A native `Navigate` issued after init is accepted. We also
-/// register a one-shot `NavigationCompleted` handler that forces the first
-/// paint (a fresh child webview stays blank until its controller bounds change).
-/// No-op off Windows.
+/// Force a first paint on a freshly-created child webview that WebView2 can
+/// leave blank until its controller bounds actually change. Nudges the *native*
+/// controller bounds by 1px and back, synchronously on the UI thread — a Tauri
+/// `set_size` pair coalesces to no net change and gets skipped. No-op off
+/// Windows.
 #[cfg(windows)]
-pub fn navigate_popup(webview: &Webview, url: String) {
-    let _ = webview.with_webview(move |pw| unsafe { imp::navigate_popup(&pw, &url) });
+pub fn force_repaint(webview: &Webview) {
+    let _ = webview.with_webview(|pw| unsafe { imp::force_repaint(&pw) });
 }
 
 #[cfg(not(windows))]
-pub fn navigate_popup(_webview: &Webview, _url: String) {}
+pub fn force_repaint(_webview: &Webview) {}
 
 #[cfg(not(windows))]
 pub fn set_zoom(_webview: &Webview, _factor: f64) {}
@@ -91,8 +86,8 @@ mod imp {
     };
     use webview2_com::{
         AcceleratorKeyPressedEventHandler, DownloadStartingEventHandler,
-        FaviconChangedEventHandler, NavigationCompletedEventHandler, ProcessFailedEventHandler,
-        StateChangedEventHandler, TrySuspendCompletedHandler,
+        FaviconChangedEventHandler, ProcessFailedEventHandler, StateChangedEventHandler,
+        TrySuspendCompletedHandler,
     };
     use windows::core::Interface;
     use windows::Win32::Foundation::RECT;
@@ -128,25 +123,8 @@ mod imp {
         let _ = controller.SetBounds(bounds);
     }
 
-    pub unsafe fn navigate_popup(pw: &PlatformWebview, url: &str) {
-        let controller = pw.controller();
-        let Ok(core) = controller.CoreWebView2() else {
-            return;
-        };
-        // Force the first paint whenever a navigation completes (about:blank and
-        // then the real extension page): the child otherwise stays blank until
-        // its bounds change. NavigationCompleted fires on the UI thread, so the
-        // synchronous bounds nudge is safe here.
-        let controller_for_paint = controller.clone();
-        let handler = NavigationCompletedEventHandler::create(Box::new(move |_sender, _args| {
-            nudge_bounds(&controller_for_paint);
-            Ok(())
-        }));
-        let mut token = 0i64;
-        let _ = core.add_NavigationCompleted(&handler, &mut token);
-        // Post-init native navigate → accepted, no NTP fallback.
-        let wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
-        let _ = core.Navigate(windows::core::PCWSTR(wide.as_ptr()));
+    pub unsafe fn force_repaint(pw: &PlatformWebview) {
+        nudge_bounds(&pw.controller());
     }
 
     pub unsafe fn suspend(pw: &PlatformWebview) {

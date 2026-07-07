@@ -714,14 +714,9 @@ pub async fn ext_open_popup(
     let window = app.get_window("main").ok_or("main window not found")?;
     let target = format!("chrome-extension://{id}/{popup}");
 
-    // Create the popup at about:blank — a safe *initial* source — then drive the
-    // real navigation natively once CoreWebView2 is initialized (see
-    // `webext::navigate_popup`). WebView2 rejects a chrome-extension:// URL as a
-    // webview's initial source, and navigating too eagerly (through wry, right
-    // after add_child) races the engine's own about:blank init and gets bounced
-    // to the new-tab page — chrome-search://local-ntp / ERR_INVALID_URL — which
-    // was the intermittent white / "can't reach this page" popup. A post-init
-    // native Navigate is accepted reliably.
+    // Create the popup at about:blank — a safe *initial* source (WebView2
+    // rejects a chrome-extension:// URL as a webview's initial source) — then
+    // navigate to the real page below, once the extension has registered.
     let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
     let w = width.max(120.0);
     let h = height.max(120.0);
@@ -756,12 +751,58 @@ pub async fn ext_open_popup(
             LogicalSize::new(w, h),
         )
         .map_err(|e| e.to_string())?;
-    // Now that the child webview exists, navigate it to the extension page
-    // natively (post-init → accepted, never bounced to the NTP) and force the
-    // first paint from NavigationCompleted. This runs once CoreWebView2 is
-    // ready, so it doesn't depend on wry's page-load events firing for
-    // about:blank.
-    crate::webext::navigate_popup(&popup_view, target);
+
+    // Navigate to the extension page, retrying until it actually lands.
+    //
+    // A fresh webview built with `extensions_path` registers its extensions
+    // (WebView2 `AddBrowserExtension`) *asynchronously*, and that finishes some
+    // time after CoreWebView2 exists. Navigate to chrome-extension://<id>/… any
+    // earlier and the URL is unknown to the engine, so it rejects the load and
+    // falls back to its new-tab page (chrome-search://local-ntp / ERR_INVALID_URL)
+    // or just shows about:blank — the intermittent white / "can't reach this
+    // page" popup. There's no wry/WebView2 signal for "extensions ready", and
+    // the timing is exactly why it worked in a slow dev build but not release.
+    // So we re-issue the navigation and poll the committed URL until it sticks
+    // on a chrome-extension:// page, then force the first paint. Bounded so a
+    // genuinely broken popup can't spin forever.
+    let popup_nav = popup_view.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(dest) = Url::parse(&target) else { return };
+        for attempt in 0..40u32 {
+            // Wait before each attempt. The initial, longer wait lets the async
+            // extension registration finish so the *first* navigate usually
+            // lands cleanly — without it, an early try is bounced to the NTP and
+            // the user sees a flash of "can't reach this page" before it sticks.
+            let delay = if attempt == 0 {
+                150
+            } else if attempt < 8 {
+                70
+            } else {
+                130
+            };
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                std::thread::sleep(std::time::Duration::from_millis(delay))
+            })
+            .await;
+
+            match popup_nav.url() {
+                // Landed on the extension page — force the first paint and stop.
+                // Don't re-navigate a good page or we'd interrupt its load.
+                Ok(u) if u.scheme() == "chrome-extension" => {
+                    crate::webext::force_repaint(&popup_nav);
+                    return;
+                }
+                // url() errors once the webview is gone (popup closed/replaced):
+                // stop looping.
+                Err(_) => return,
+                // Still about:blank or bounced to the NTP → (re)issue the nav.
+                _ => {
+                    let _ = popup_nav.navigate(dest.clone());
+                }
+            }
+        }
+    });
+
     // Dev-only: surface the popup's console so a blank extension page (usually a
     // service-worker/`chrome.runtime` failure) can be diagnosed.
     #[cfg(debug_assertions)]
