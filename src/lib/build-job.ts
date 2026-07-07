@@ -4,7 +4,8 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { elapsedSince } from "./format";
-import { ipc, type BuildAction, type BuildRequest } from "./ipc";
+import { ipc, type BuildAction, type BuildRequest, type EngineInstall } from "./ipc";
+import type { UnrealProject } from "./unreal";
 
 export { elapsedSince } from "./format";
 
@@ -149,6 +150,30 @@ export function jobProgressValue(job: BuildJob): number | null {
 /** True while the process is still running (no exit code yet). */
 export function jobRunning(job: BuildJob): boolean {
   return job.exitCode === null;
+}
+
+/** The colour class for a job's settled status line: neutral on success,
+ *  Signal on failure, and empty while still running or cancelling (so callers
+ *  don't tint the live stage). One source so the dashboard tile, the work-bar
+ *  card and the hub can't drift on what "failed" looks like. */
+export function jobVerdictClass(job: BuildJob): string {
+  if (jobRunning(job) || job.cancelRequested) return "";
+  return job.exitCode === 0 ? "text-ink-100" : "text-signal-400";
+}
+
+/** Kick off a Win64 Development package for a linked project. No-ops if a build
+ *  is already running. The one place the package request is spelled out, shared
+ *  by the dashboard tile and the work-bar card. */
+export function packageProject(project: UnrealProject, engine: EngineInstall): void {
+  if (buildJobRunning()) return;
+  startBuildJob(project.name, {
+    enginePath: engine.path,
+    uproject: project.uprojectPath,
+    action: "package",
+    config: "Development",
+    platform: "Win64",
+    archiveDir: project.archiveDir || undefined,
+  });
 }
 
 /**

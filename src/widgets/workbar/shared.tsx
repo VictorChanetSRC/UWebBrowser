@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { trackedGame } from "../types";
 import type { BarEditorProps, BarWidgetBase } from "./define";
 
 /**
@@ -44,7 +45,7 @@ export function TracksGameEditor<W extends BarWidgetBase & { gameId: string | nu
   onPatch,
 }: BarEditorProps<W>) {
   if (games.length < 2) return null;
-  const selected = games.find((g) => g.id === widget.gameId) ?? games[0] ?? null;
+  const selected = trackedGame(widget.gameId, games);
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-border p-2.5 pl-3.5">
       <Label className="mr-1 text-[10px]">Tracks</Label>

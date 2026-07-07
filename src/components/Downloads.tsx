@@ -121,7 +121,7 @@ export function Downloads({
               open (see onPanelOpenChange), so this backdrop is reachable. */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
           <div
-            className="absolute right-0 top-[calc(100%+8px)] z-50 w-[360px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
+            className="absolute right-0 top-[calc(100%+8px)] z-50 w-[360px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-popover"
             role="dialog"
             aria-label="Downloads"
           >

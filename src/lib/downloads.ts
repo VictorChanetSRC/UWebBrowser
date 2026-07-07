@@ -4,6 +4,8 @@
  *  persists a capped history to localStorage so past downloads survive a
  *  restart (like history and the session do). */
 
+import { loadJson, saveJson } from "./storage";
+
 export type DownloadState = "active" | "done" | "fail" | "cancel";
 
 export type DownloadRec = {
@@ -143,31 +145,26 @@ export const countActive = (items: DownloadRec[]): number =>
   items.filter((d) => d.state === "active").length;
 
 export function loadDownloads(): DownloadRec[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as DownloadRec[];
-    if (!Array.isArray(parsed)) return [];
-    // A download can't survive the app closing, so anything left "active" was
-    // interrupted — show it as failed rather than a forever-spinning row.
-    return parsed.map((d) =>
-      d.state === "active" ? { ...d, state: "fail", speed: 0 } : { ...d, speed: 0 },
-    );
-  } catch {
-    return [];
-  }
+  return loadJson<DownloadRec[]>(
+    [STORAGE_KEY],
+    (raw) => {
+      if (!Array.isArray(raw)) return null;
+      // A download can't survive the app closing, so anything left "active" was
+      // interrupted — show it as failed rather than a forever-spinning row.
+      return (raw as DownloadRec[]).map((d) =>
+        d.state === "active" ? { ...d, state: "fail", speed: 0 } : { ...d, speed: 0 },
+      );
+    },
+    () => [],
+  );
 }
 
 export function saveDownloads(items: DownloadRec[]): void {
-  try {
-    // Persist a slim projection: drop the transient speed-sampling anchors.
-    const slim = items.slice(0, MAX_ITEMS).map(({ sampleAt, sampleBytes, ...rest }) => {
-      void sampleAt;
-      void sampleBytes;
-      return rest;
-    });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
-  } catch {
-    /* storage full or unavailable — history is best-effort */
-  }
+  // Persist a slim projection: drop the transient speed-sampling anchors.
+  const slim = items.slice(0, MAX_ITEMS).map(({ sampleAt, sampleBytes, ...rest }) => {
+    void sampleAt;
+    void sampleBytes;
+    return rest;
+  });
+  saveJson(STORAGE_KEY, slim);
 }

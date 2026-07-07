@@ -101,7 +101,7 @@ export function Select({
           id={listId}
           role="listbox"
           aria-label={ariaLabel}
-          className="absolute right-0 top-[calc(100%+4px)] z-50 max-h-56 min-w-full overflow-y-auto rounded-lg border border-ink-700 bg-ink-900 p-1 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
+          className="absolute right-0 top-[calc(100%+4px)] z-50 max-h-56 min-w-full overflow-y-auto rounded-lg border border-ink-700 bg-ink-900 p-1 shadow-popover"
         >
           {options.map((option, index) => (
             <li

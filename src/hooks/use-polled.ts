@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type PolledState<T> = { data: T | null; error: string | null };
 
@@ -32,6 +32,10 @@ export function usePolled<T>(
     data: cacheKey && resultCache.has(cacheKey) ? (resultCache.get(cacheKey) as T) : null,
     error: null,
   }));
+  // The lazy initializer above already set the mount state; the effect only
+  // needs to re-seed when the deps actually change, so track the first run and
+  // skip its redundant setState (which cost every tile an extra render).
+  const firstRun = useRef(true);
 
   useEffect(() => {
     if (!enabled) return;
@@ -69,11 +73,16 @@ export function usePolled<T>(
     };
 
     // Reset for the new deps — but keep any cached last-good value so a keyed
-    // widget shows data immediately instead of a skeleton.
-    setState({
-      data: cacheKey && resultCache.has(cacheKey) ? (resultCache.get(cacheKey) as T) : null,
-      error: null,
-    });
+    // widget shows data immediately instead of a skeleton. Skipped on the first
+    // run: the lazy initializer already set exactly this.
+    if (firstRun.current) {
+      firstRun.current = false;
+    } else {
+      setState({
+        data: cacheKey && resultCache.has(cacheKey) ? (resultCache.get(cacheKey) as T) : null,
+        error: null,
+      });
+    }
     if (!document.hidden) tick();
     document.addEventListener("visibilitychange", onVisibility);
 

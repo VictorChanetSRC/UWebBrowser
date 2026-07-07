@@ -7,9 +7,9 @@
 //!
 //! [`get_or_fetch`] serves a fresh cached value when one exists, and on a fetch
 //! error falls back to the last-good value (any age) so a transient upstream
-//! throttle shows stale-but-valid data instead of an empty widget. `github.rs`
-//! keeps its own single-slot caches; everything else keyed by argument goes
-//! through here.
+//! throttle shows stale-but-valid data instead of an empty widget. Every keyed
+//! response goes through here, including `github.rs`'s single-slot caches (one
+//! fixed key each).
 
 use std::collections::HashMap;
 use std::future::Future;

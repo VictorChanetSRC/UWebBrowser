@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Activity } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -7,7 +7,7 @@ import { playerHistory, recordPlayers, type PlayerSample } from "@/lib/steam-pla
 import { usePolled } from "@/hooks/use-polled";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { VICTOR_CHANET } from "../types";
+import { trackedGame, VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
 import { TracksGameEditor, WidgetCard, WidgetHint } from "./shared";
 
@@ -26,7 +26,7 @@ const BLINK_MS = 1_200;
 const HOUR_MS = 60 * 60_000;
 
 function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamPlayersWidget>) {
-  const game = games.find((g) => g.id === widget.gameId) ?? games[0] ?? null;
+  const game = trackedGame(widget.gameId, games);
   const appid = game?.steamAppId?.trim() ?? "";
   // Wrap the count in a fresh object so every poll — even one returning the
   // same number — lands as an update; the blink and the trace key off it.
@@ -100,7 +100,13 @@ function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamP
  * clock — samples land where in the hour they happened — and y spans the
  * window's own min..max so small swings in a steady count stay visible.
  */
-function HourTrace({ samples, now }: { samples: PlayerSample[]; now: number }) {
+const HourTrace = memo(function HourTrace({
+  samples,
+  now,
+}: {
+  samples: PlayerSample[];
+  now: number;
+}) {
   const w = 100;
   const h = 32;
   const visible = samples.filter((s) => now - s.t <= HOUR_MS);
@@ -144,7 +150,7 @@ function HourTrace({ samples, now }: { samples: PlayerSample[]; now: number }) {
       />
     </svg>
   );
-}
+});
 
 export default defineBarWidget<SteamPlayersWidget>({
   type: "steam-players",

@@ -1,3 +1,5 @@
+import { loadJson, saveJson } from "./storage";
+
 export type HistoryEntry = {
   url: string;
   title: string;
@@ -25,32 +27,28 @@ let persistTimer: number | null = null;
 
 function load(): HistoryEntry[] {
   if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    cache = raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
-  } catch {
-    cache = [];
-  }
+  cache = loadJson<HistoryEntry[]>(
+    [KEY],
+    (raw) => (Array.isArray(raw) ? (raw as HistoryEntry[]) : null),
+    () => [],
+  );
   return cache;
 }
 
 /** Visit log, stored oldest → newest. */
 function loadLog(): Visit[] {
   if (logCache) return logCache;
-  try {
-    const raw = localStorage.getItem(LOG_KEY);
-    logCache = raw ? (JSON.parse(raw) as Visit[]) : null;
-  } catch {
-    logCache = null;
-  }
-  if (!logCache) {
+  logCache = loadJson<Visit[]>(
+    [LOG_KEY],
+    (raw) => (Array.isArray(raw) ? (raw as Visit[]) : null),
     // First run since the log was introduced: seed it from the aggregate
     // store so pre-existing history shows up on the History page — one visit
     // per known page, at its last-visited time.
-    logCache = load()
-      .map((e): Visit => ({ url: e.url, title: e.title, ts: e.lastVisit }))
-      .sort((a, b) => a.ts - b.ts);
-  }
+    () =>
+      load()
+        .map((e): Visit => ({ url: e.url, title: e.title, ts: e.lastVisit }))
+        .sort((a, b) => a.ts - b.ts),
+  );
   return logCache;
 }
 
@@ -67,8 +65,8 @@ function flush() {
     window.clearTimeout(persistTimer);
     persistTimer = null;
   }
-  if (cache) localStorage.setItem(KEY, JSON.stringify(cache));
-  if (logCache) localStorage.setItem(LOG_KEY, JSON.stringify(logCache));
+  if (cache) saveJson(KEY, cache);
+  if (logCache) saveJson(LOG_KEY, logCache);
 }
 
 if (typeof window !== "undefined") {

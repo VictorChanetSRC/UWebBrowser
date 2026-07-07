@@ -11,7 +11,10 @@ import { GITHUB_REPO_URL } from "../lib/github";
 import { fmtNumber } from "../lib/format";
 import { FeedbackDialog } from "./FeedbackDialog";
 import { Button } from "@/components/ui/button";
+import { ARMED_CLASS, ConfirmButton } from "@/components/ui/confirm-button";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { cn } from "@/lib/utils";
 
 type Props = {
   settings: BrowserSettings;
@@ -91,16 +94,11 @@ export function Settings({
   return (
     <div className="absolute inset-0 @container overflow-y-auto">
       <div className="mx-auto flex max-w-[1100px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
-        <header>
-          <Label>Settings</Label>
-          <h1 className="my-2.5 text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-            Make it yours.
-          </h1>
-          <p className="text-ink-400">
-            Search, privacy and housekeeping for UWebBrowser. Everything here
-            takes effect immediately.
-          </p>
-        </header>
+        <PageHeader
+          kicker="Settings"
+          title="Make it yours."
+          description="Search, privacy and housekeeping for UWebBrowser. Everything here takes effect immediately."
+        />
 
         <SettingsSection label="Search">
           <Row
@@ -135,7 +133,7 @@ export function Settings({
               }
             >
               <Button
-                className="flex-none"
+                className={cn("flex-none", clearState === "confirm" && ARMED_CLASS)}
                 disabled={clearState === "working"}
                 onClick={clearBrowsingData}
               >
@@ -159,13 +157,13 @@ export function Settings({
                   : `${visitCount} ${visitCount === 1 ? "page" : "pages"} remembered. Browse and search them on the History page (Ctrl+H).`
               }
             >
-              <Button
+              <ConfirmButton
                 className="flex-none"
                 disabled={visitCount === 0}
-                onClick={handleClearHistory}
+                onConfirm={handleClearHistory}
               >
                 Clear history
-              </Button>
+              </ConfirmButton>
             </Row>
           </div>
         </SettingsSection>
@@ -190,16 +188,16 @@ export function Settings({
                   : "Replaces your widgets with the defaults: live status on top, curated Unreal links below."
               }
             >
-              <Button
+              <ConfirmButton
                 className="flex-none"
-                onClick={() => {
+                onConfirm={() => {
                   onResetPins();
                   setPinsReset(true);
                   settle(() => setPinsReset(false));
                 }}
               >
                 Reset work bar
-              </Button>
+              </ConfirmButton>
             </Row>
           </div>
         </SettingsSection>

@@ -2,6 +2,7 @@ import { Gamepad2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { PLATFORMS } from "@/lib/platforms";
 import { fmtNumber, MISSING } from "@/lib/format";
+import { positivePct, priceLabel, releaseLabel } from "@/lib/steam";
 import { jobRunning } from "@/lib/build-job";
 import { usePolled } from "@/hooks/use-polled";
 import { useBuildJob } from "@/hooks/use-build-job";
@@ -54,10 +55,7 @@ function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<
     );
   }
 
-  const positive =
-    stats?.reviews?.total_reviews && stats.reviews.total_positive !== undefined
-      ? Math.round((stats.reviews.total_positive / stats.reviews.total_reviews) * 100)
-      : null;
+  const positive = positivePct(stats?.reviews);
 
   const platforms = PLATFORMS.filter((p) => game.platforms?.[p.key]?.url);
 
@@ -110,22 +108,8 @@ function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<
             <Stat label="Review score" value={stats.reviews?.review_score_desc ?? MISSING} />
             <Stat label="Positive" value={positive !== null ? `${positive}%` : MISSING} />
             <Stat label="Reviews" value={fmtNumber(stats.reviews?.total_reviews)} />
-            <Stat
-              label="Price"
-              value={
-                stats.details?.is_free
-                  ? "Free"
-                  : stats.details?.price_overview?.final_formatted ?? MISSING
-              }
-            />
-            <Stat
-              label="Release"
-              value={
-                stats.details?.release_date?.coming_soon
-                  ? "Coming soon"
-                  : stats.details?.release_date?.date ?? MISSING
-              }
-            />
+            <Stat label="Price" value={priceLabel(stats.details)} />
+            <Stat label="Release" value={releaseLabel(stats.details)} />
           </StatGrid>
         )
       ) : (

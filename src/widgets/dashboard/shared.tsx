@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import type { Game } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -7,6 +6,10 @@ import { Label } from "@/components/ui/label";
 import { LiveDot } from "@/components/ui/live-dot";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { DashConfigProps, DashWidgetBase } from "./define";
+
+// The game-tracking helper is shared across both widget surfaces; re-exported
+// here so dashboard widgets keep importing it from one place.
+export { trackedGame } from "../types";
 
 /**
  * The building blocks dashboard widget bodies are made of. Compose these and
@@ -129,11 +132,6 @@ export function Stat({
   );
 }
 
-/** The game a widget tracks: its pick, or the first game on the setup. */
-export function trackedGame(gameId: string | null, games: Game[]): Game | null {
-  return games.find((g) => g.id === gameId) ?? games[0] ?? null;
-}
-
 /* ------------------------------ config strips ------------------------------ */
 
 /**
@@ -143,7 +141,7 @@ export function trackedGame(gameId: string | null, games: Game[]): Game | null {
  */
 export function ConfigStrip({ children }: { children: ReactNode }) {
   return (
-    <div className="absolute inset-x-2 bottom-2 rounded-[10px] border border-border bg-ink-900/95 shadow-[0_10px_28px_rgba(0,0,0,0.4)] backdrop-blur">
+    <div className="absolute inset-x-2 bottom-2 rounded-[10px] border border-border bg-ink-900/95 shadow-strip backdrop-blur">
       {children}
     </div>
   );

@@ -20,7 +20,7 @@ const push = (prev: number[], value: number) => [...prev, value].slice(-HISTORY_
 type SystemHistory = { cpu: number[]; gpu: number[]; ram: number[] };
 
 function SystemBody({ active }: BarBodyProps<SystemWidget>) {
-  const { data } = usePolled(() => ipc.systemStats(), [], 5000, active, "system");
+  const { data } = usePolled(() => ipc.systemStats(), [], 8000, active, "system");
   const [history, setHistory] = useState<SystemHistory>({ cpu: [], gpu: [], ram: [] });
 
   useEffect(() => {

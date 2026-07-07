@@ -1,4 +1,6 @@
 import type { Game } from "./config";
+import { loadJson, saveJson } from "./storage";
+import { moveBy, moveTo, patchById, removeById } from "./list-ops";
 import {
   DASH_WIDGET_TYPES,
   defaultTileSpan,
@@ -82,32 +84,28 @@ export function seedDashboard(games: Game[]): DashWidget[] {
 }
 
 export function loadDashboard(games: Game[]): DashWidget[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const widgets = parsed
-          .filter((w): w is DashWidget => w && DASH_WIDGET_TYPES.includes(w.type))
-          .map((w) => ({
-            ...w,
-            span: normalizeSpan(
-              (w as { span?: unknown; size?: unknown }).span ??
-                (w as { size?: unknown }).size,
-              w.type,
-            ),
-          }));
-        if (widgets.length > 0) return reconcileDashboard(widgets, games);
-      }
-    }
-  } catch {
-    // fall through to seed
-  }
-  return seedDashboard(games);
+  return loadJson<DashWidget[]>(
+    [KEY],
+    (raw) => {
+      if (!Array.isArray(raw)) return null;
+      const widgets = raw
+        .filter((w): w is DashWidget => w && DASH_WIDGET_TYPES.includes(w.type))
+        .map((w) => ({
+          ...w,
+          span: normalizeSpan(
+            (w as { span?: unknown; size?: unknown }).span ??
+              (w as { size?: unknown }).size,
+            w.type,
+          ),
+        }));
+      return widgets.length > 0 ? reconcileDashboard(widgets, games) : null;
+    },
+    () => seedDashboard(games),
+  );
 }
 
 export function saveDashboard(widgets: DashWidget[]) {
-  localStorage.setItem(KEY, JSON.stringify(widgets));
+  saveJson(KEY, widgets);
 }
 
 /**
@@ -146,22 +144,16 @@ export function addDashWidget(widgets: DashWidget[], type: DashWidgetType): Dash
 }
 
 export function removeDashWidget(widgets: DashWidget[], id: string): DashWidget[] {
-  return widgets.filter((w) => w.id !== id);
+  return removeById(widgets, id);
 }
 
 export function moveDashWidget(widgets: DashWidget[], id: string, dir: -1 | 1): DashWidget[] {
-  const from = widgets.findIndex((w) => w.id === id);
-  return moveDashWidgetTo(widgets, id, from + dir);
+  return moveBy(widgets, id, dir);
 }
 
 /** Move a widget to an absolute index; a no-op returns the same array. */
 export function moveDashWidgetTo(widgets: DashWidget[], id: string, to: number): DashWidget[] {
-  const from = widgets.findIndex((w) => w.id === id);
-  if (from < 0 || to < 0 || to >= widgets.length || from === to) return widgets;
-  const next = [...widgets];
-  const [moved] = next.splice(from, 1);
-  next.splice(to, 0, moved);
-  return next;
+  return moveTo(widgets, id, to);
 }
 
 export function updateDashWidget(
@@ -169,5 +161,5 @@ export function updateDashWidget(
   id: string,
   patch: Partial<DashWidget>,
 ): DashWidget[] {
-  return widgets.map((w) => (w.id === id ? ({ ...w, ...patch } as DashWidget) : w));
+  return patchById(widgets, id, patch);
 }

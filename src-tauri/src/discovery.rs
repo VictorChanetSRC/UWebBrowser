@@ -3,14 +3,23 @@
 //! network or parse failure surfaces as Err so the UI can say "couldn't
 //! check" instead of "not found".
 
+use std::sync::LazyLock;
+use std::time::Duration;
+
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::cache::{get_or_fetch, TtlCache};
 use crate::http::{self, err};
 
 /// Twitch's public web client id. Rotates rarely; when it does, `twitch`
 /// re-reads it from the homepage.
 const TWITCH_CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+
+/// A storefront hit barely changes; caching it keeps re-running (or re-mounting)
+/// the finder from re-sweeping all ~10 stores live. Keyed by `platform:query`.
+const CHECK_TTL: Duration = Duration::from_secs(10 * 60);
+static CHECKS: LazyLock<TtlCache<PlatformHit>> = LazyLock::new(|| TtlCache::new(CHECK_TTL));
 
 #[derive(Serialize, Clone, Default)]
 pub struct PlatformHit {
@@ -94,19 +103,23 @@ pub async fn check_platform(platform: String, query: String) -> Result<PlatformH
     if q.is_empty() {
         return Err("empty game name".into());
     }
-    let client = http::shared()?;
-    match platform.as_str() {
-        "steam" => steam(client, &q).await,
-        "epic" => epic(client, &q).await,
-        "xbox" => xbox(client, &q).await,
-        "playstation" => playstation(client, &q).await,
-        "nintendo" => nintendo(client, &q).await,
-        "appstore" => appstore(client, &q).await,
-        "googleplay" => googleplay(client, &q).await,
-        "itch" => itch(client, &q).await,
-        "twitch" => twitch(client, &q).await,
-        other => Err(format!("unknown platform: {other}")),
-    }
+    let key = format!("{platform}:{q}");
+    get_or_fetch(&CHECKS, &key, async move {
+        let client = http::shared()?;
+        match platform.as_str() {
+            "steam" => steam(client, &q).await,
+            "epic" => epic(client, &q).await,
+            "xbox" => xbox(client, &q).await,
+            "playstation" => playstation(client, &q).await,
+            "nintendo" => nintendo(client, &q).await,
+            "appstore" => appstore(client, &q).await,
+            "googleplay" => googleplay(client, &q).await,
+            "itch" => itch(client, &q).await,
+            "twitch" => twitch(client, &q).await,
+            other => Err(format!("unknown platform: {other}")),
+        }
+    })
+    .await
 }
 
 async fn steam(client: &reqwest::Client, q: &str) -> Result<PlatformHit, String> {

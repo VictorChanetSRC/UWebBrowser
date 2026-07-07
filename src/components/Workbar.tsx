@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronUp, Store, X } from "lucide-react";
 import type { Game } from "../lib/config";
 import {
@@ -12,8 +12,9 @@ import {
 import { BAR_SPECS, BarWidgetEditor, barWidgetTitle } from "@/widgets/workbar";
 import { WorkbarShop } from "./WidgetShop";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Section } from "@/components/ui/section";
 
 type Props = {
@@ -28,47 +29,30 @@ type Props = {
 export function Workbar({ widgets, games, itchApiKey, onChange, onOpen }: Props) {
   const [shopOpen, setShopOpen] = useState(false);
 
-  const [confirmReset, setConfirmReset] = useState(false);
-  const resetTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
-
-  const reset = () => {
-    if (!confirmReset) {
-      setConfirmReset(true);
-      window.clearTimeout(resetTimer.current);
-      resetTimer.current = window.setTimeout(() => setConfirmReset(false), 4000);
-      return;
-    }
-    setConfirmReset(false);
-    onChange(seedWidgets());
-  };
-
   return (
     <>
       <div className="absolute inset-0 @container overflow-y-auto">
         <div className="mx-auto flex max-w-[880px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
-          <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-            <div>
-              <Label>Work bar</Label>
-              <h1 className="my-2.5 text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-                Build your work bar.
-              </h1>
-              <p className="max-w-[60ch] text-ink-400">
-                Widgets ride along in the side rail while you browse. Pick them
-                up in the widget shop — every one previews live — then order and
-                tune them here.
-              </p>
-            </div>
-            <div className="flex gap-2.5">
-              <Button variant="primary" onClick={() => setShopOpen(true)}>
-                <Store className="size-3.5" aria-hidden />
-                Browse widgets
-              </Button>
-              <Button variant="ghost" onClick={reset}>
-                {confirmReset ? "Click again to reset" : "Reset to defaults"}
-              </Button>
-            </div>
-          </header>
+          <PageHeader
+            kicker="Work bar"
+            title="Build your work bar."
+            description="Widgets ride along in the side rail while you browse. Pick them up in the widget shop — every one previews live — then order and tune them here."
+            actions={
+              <div className="flex gap-2.5">
+                <Button variant="primary" onClick={() => setShopOpen(true)}>
+                  <Store className="size-3.5" aria-hidden />
+                  Browse widgets
+                </Button>
+                <ConfirmButton
+                  variant="ghost"
+                  confirmLabel="Click again to reset"
+                  onConfirm={() => onChange(seedWidgets())}
+                >
+                  Reset to defaults
+                </ConfirmButton>
+              </div>
+            }
+          />
 
           <Section label={`On your bar · ${widgets.length}`} className="min-w-0">
             {widgets.length === 0 ? (

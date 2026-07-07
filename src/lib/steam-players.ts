@@ -45,15 +45,26 @@ export function playerHistory(appid: string): PlayerSample[] {
 export function recordPlayers(appid: string, players: number): PlayerSample[] {
   const store = load();
   const now = Date.now();
+  // Track whether anything actually changed, so a steady 30 s poll that adds no
+  // sample (inside MIN_GAP) doesn't re-stringify the whole store every tick.
+  let changed = false;
   for (const [id, samples] of Object.entries(store)) {
     const kept = inWindow(samples, now);
-    if (kept.length > 0) store[id] = kept;
-    else delete store[id];
+    if (kept.length === 0) {
+      delete store[id];
+      changed = true;
+    } else if (kept.length !== samples.length) {
+      store[id] = kept;
+      changed = true;
+    }
   }
   const samples = store[appid] ?? [];
   const last = samples[samples.length - 1];
-  if (!last || now - last.t >= MIN_GAP_MS) samples.push({ t: now, players });
+  if (!last || now - last.t >= MIN_GAP_MS) {
+    samples.push({ t: now, players });
+    changed = true;
+  }
   store[appid] = samples;
-  saveJson(KEY, store);
+  if (changed) saveJson(KEY, store);
   return samples;
 }

@@ -1,4 +1,5 @@
 import type { PlatformHit, PlatformKey } from "./platforms";
+import { loadJson, saveJson } from "./storage";
 
 export type Game = {
   id: string;
@@ -31,38 +32,39 @@ export const newGame = (): Game => ({
 });
 
 export function loadConfig(): UwbConfig {
-  try {
-    const raw = localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY);
-    if (!raw) return { ...emptyConfig };
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.games)) {
-      return {
-        games: parsed.games,
-        itchApiKey: parsed.itchApiKey ?? "",
-        done: Boolean(parsed.done),
+  return loadJson(
+    [KEY, LEGACY_KEY],
+    (raw): UwbConfig | null => {
+      if (typeof raw !== "object" || raw === null) return null;
+      const parsed = raw as {
+        games?: unknown;
+        itchApiKey?: unknown;
+        done?: unknown;
+        gameName?: unknown;
+        steamAppId?: unknown;
       };
-    }
-    // v1 config held a single game inline; carry it over.
-    const games =
-      parsed.gameName || parsed.steamAppId
-        ? [
-            {
-              id: crypto.randomUUID(),
-              name: parsed.gameName ?? "",
-              steamAppId: parsed.steamAppId ?? "",
-            },
-          ]
-        : [];
-    return {
-      games,
-      itchApiKey: parsed.itchApiKey ?? "",
-      done: Boolean(parsed.done),
-    };
-  } catch {
-    return { ...emptyConfig };
-  }
+      const itchApiKey = typeof parsed.itchApiKey === "string" ? parsed.itchApiKey : "";
+      const done = Boolean(parsed.done);
+      if (Array.isArray(parsed.games)) {
+        return { games: parsed.games as Game[], itchApiKey, done };
+      }
+      // v1 config held a single game inline; carry it over.
+      const games: Game[] =
+        parsed.gameName || parsed.steamAppId
+          ? [
+              {
+                id: crypto.randomUUID(),
+                name: String(parsed.gameName ?? ""),
+                steamAppId: String(parsed.steamAppId ?? ""),
+              },
+            ]
+          : [];
+      return { games, itchApiKey, done };
+    },
+    () => ({ ...emptyConfig }),
+  );
 }
 
 export function saveConfig(config: UwbConfig) {
-  localStorage.setItem(KEY, JSON.stringify(config));
+  saveJson(KEY, config);
 }

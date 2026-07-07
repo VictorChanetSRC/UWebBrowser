@@ -4,13 +4,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ipc, type EngineInstall } from "@/lib/ipc";
 import { makeProject, matchEngine, mergeEngines, projectForGame } from "@/lib/unreal";
 import {
-  buildJobRunning,
   cancelBuildJob,
   jobProgressCaption,
   jobProgressValue,
   jobRunning,
   jobStatusLabel,
-  startBuildJob,
+  jobVerdictClass,
+  packageProject,
 } from "@/lib/build-job";
 import { elapsedSince } from "@/lib/format";
 import { useBuildJob } from "@/hooks/use-build-job";
@@ -35,16 +35,19 @@ export type BuildWidget = {
   gameId: string | null;
 };
 
-function BuildBody({ widget, games, onUnreal }: DashBodyProps<BuildWidget>) {
+function BuildBody({ widget, games, active, onUnreal }: DashBodyProps<BuildWidget>) {
   const game = trackedGame(widget.gameId, games);
   const [unrealState, setUnrealState] = useUnrealState();
   const [detected, setDetected] = useState<EngineInstall[]>([]);
   const [error, setError] = useState<string | null>(null);
   const job = useBuildJob();
 
+  // Engine detection scans the disk/registry; only run it for a live tile (the
+  // work-bar twin gates the same way), not for an inert shop preview.
   useEffect(() => {
+    if (!active) return;
     ipc.detectEngines().then(setDetected).catch(() => {});
-  }, []);
+  }, [active]);
 
   const engines = mergeEngines(detected, unrealState.manualEngines);
 
@@ -105,15 +108,7 @@ function BuildBody({ widget, games, onUnreal }: DashBodyProps<BuildWidget>) {
   const running = ourJob !== null && jobRunning(ourJob);
 
   const packageGame = () => {
-    if (!project || !engine || buildJobRunning()) return;
-    startBuildJob(project.name, {
-      enginePath: engine.path,
-      uproject: project.uprojectPath,
-      action: "package",
-      config: "Development",
-      platform: "Win64",
-      archiveDir: project.archiveDir || undefined,
-    });
+    if (project && engine) packageProject(project, engine);
   };
 
   return (
@@ -149,14 +144,7 @@ function BuildBody({ widget, games, onUnreal }: DashBodyProps<BuildWidget>) {
             <div className="flex items-center gap-3 text-sm">
               {/* The one Signal moment on this screen: a build in flight. */}
               {running && !ourJob.cancelRequested && <LiveDot />}
-              <span
-                className={cn(
-                  "font-medium",
-                  !running &&
-                    !ourJob.cancelRequested &&
-                    (ourJob.exitCode === 0 ? "text-ink-100" : "text-signal-400"),
-                )}
-              >
+              <span className={cn("font-medium", jobVerdictClass(ourJob))}>
                 {jobStatusLabel(ourJob)}
               </span>
               <span className="font-mono text-[11.5px] text-ink-500">

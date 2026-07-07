@@ -1,9 +1,10 @@
 import { Gamepad2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { MISSING } from "@/lib/format";
+import { positivePct, priceLabel } from "@/lib/steam";
 import { usePolled } from "@/hooks/use-polled";
 import { Skeleton } from "@/components/ui/skeleton";
-import { VICTOR_CHANET } from "../types";
+import { trackedGame, VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
 import { TracksGameEditor, WidgetCard, WidgetHint } from "./shared";
 
@@ -16,7 +17,7 @@ export type SteamGameWidget = {
 };
 
 function SteamGameBody({ widget, games, active, onOpen }: BarBodyProps<SteamGameWidget>) {
-  const game = games.find((g) => g.id === widget.gameId) ?? games[0] ?? null;
+  const game = trackedGame(widget.gameId, games);
   const appid = game?.steamAppId?.trim() ?? "";
   // Key art, reviews and price barely move; 5 minutes is plenty.
   const { data, error } = usePolled(
@@ -27,14 +28,13 @@ function SteamGameBody({ widget, games, active, onOpen }: BarBodyProps<SteamGame
     `game:${appid}`,
   );
 
-  const positive =
-    data?.reviews?.total_reviews && data.reviews.total_positive !== undefined
-      ? Math.round((data.reviews.total_positive / data.reviews.total_reviews) * 100)
-      : null;
-  const price = data?.details?.is_free
-    ? "Free"
-    : data?.details?.price_overview?.final_formatted ??
-      (data?.details?.release_date?.coming_soon ? "Coming soon" : MISSING);
+  const positive = positivePct(data?.reviews);
+  // The compact card has no separate release row, so fold "Coming soon" into
+  // the price slot when there's no price yet.
+  const price =
+    priceLabel(data?.details) === MISSING && data?.details?.release_date?.coming_soon
+      ? "Coming soon"
+      : priceLabel(data?.details);
 
   return (
     <WidgetCard

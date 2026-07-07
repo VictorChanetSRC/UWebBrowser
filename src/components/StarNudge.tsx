@@ -40,7 +40,7 @@ export function StarNudge({ onOpen, onDismiss, onToast }: Props) {
   };
 
   return (
-    <div className="absolute bottom-5 right-3 z-40 w-[360px] animate-rise rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.55)]">
+    <div className="absolute bottom-5 right-3 z-40 w-[360px] animate-rise rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-modal">
       <div className="flex items-start gap-3">
         <span className="flex size-9 flex-none items-center justify-center rounded-lg bg-ink-800 text-ink-200">
           <Star className="size-4" aria-hidden />

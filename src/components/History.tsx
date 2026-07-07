@@ -1,10 +1,13 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { History as HistoryIcon, Trash2, X } from "lucide-react";
 import { clearHistory, deleteVisit, getVisits, type Visit } from "../lib/history";
 import { SearchField } from "./SearchField";
 import { Button } from "@/components/ui/button";
+import { ARMED_CLASS } from "@/components/ui/confirm-button";
 import { Favicon } from "@/components/ui/favicon";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { useConfirm } from "@/hooks/use-confirm";
 import { cn } from "@/lib/utils";
 import { hostOf } from "@/lib/url";
 
@@ -80,8 +83,10 @@ export function History({ onOpen }: Props) {
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<RangeKey>("all");
   const [shownCount, setShownCount] = useState(PAGE_SIZE);
-  const [confirmingClear, setConfirmingClear] = useState(false);
-  const confirmTimer = useRef<number | undefined>(undefined);
+  const clearAll = useConfirm(() => {
+    clearHistory();
+    setVisits([]);
+  });
 
   // One clock per render keeps "Today" headings and range bounds consistent.
   const now = Date.now();
@@ -131,35 +136,14 @@ export function History({ onOpen }: Props) {
     setVisits(getVisits());
   };
 
-  const handleClear = () => {
-    if (!confirmingClear) {
-      setConfirmingClear(true);
-      window.clearTimeout(confirmTimer.current);
-      confirmTimer.current = window.setTimeout(
-        () => setConfirmingClear(false),
-        5000,
-      );
-      return;
-    }
-    window.clearTimeout(confirmTimer.current);
-    clearHistory();
-    setVisits([]);
-    setConfirmingClear(false);
-  };
-
   return (
     <div className="absolute inset-0 @container overflow-y-auto">
       <div className="mx-auto flex max-w-[1100px] animate-rise flex-col gap-7 px-10 pb-20 pt-14">
-        <header>
-          <Label>History</Label>
-          <h1 className="my-2.5 text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-            Where you&rsquo;ve been.
-          </h1>
-          <p className="text-ink-400">
-            Every page you&rsquo;ve visited, newest first. Search it, narrow it
-            to a day, or prune what you don&rsquo;t want remembered.
-          </p>
-        </header>
+        <PageHeader
+          kicker="History"
+          title="Where you’ve been."
+          description="Every page you’ve visited, newest first. Search it, narrow it to a day, or prune what you don’t want remembered."
+        />
 
         <div className="flex flex-col gap-3.5">
           <div className="flex items-center gap-3">
@@ -174,14 +158,14 @@ export function History({ onOpen }: Props) {
               className={cn(
                 "h-[54px] flex-none rounded-xl px-5",
                 // Arm state reads as destructive, not just a label swap.
-                confirmingClear &&
-                  "border-signal-600 bg-signal-600/15 text-signal-300 hover:bg-signal-600/25",
+                clearAll.armed && ARMED_CLASS,
               )}
               disabled={visits.length === 0}
-              onClick={handleClear}
+              onClick={clearAll.trigger}
+              aria-live="polite"
             >
               <Trash2 className="size-3.5" aria-hidden />
-              {confirmingClear ? "Click again to confirm" : "Clear all"}
+              {clearAll.armed ? "Click again to confirm" : "Clear all"}
             </Button>
           </div>
           <div className="flex flex-wrap items-center gap-2">

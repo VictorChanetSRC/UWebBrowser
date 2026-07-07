@@ -34,6 +34,13 @@
 
   --ease-brand: cubic-bezier(0.2, 0, 0, 1);
 
+  /* Elevation ramp. Three levels for every floating surface so shadows stop
+     being hand-rolled per component: a strip sitting just off the page, a
+     popover/dropdown, and a modal dialog lifted highest. */
+  --shadow-strip: 0 10px 28px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 18px 44px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.55);
+
   --animate-tab-in: tab-in 0.16s var(--ease-brand);
   --animate-rise: rise 0.4s var(--ease-brand) both;
   --animate-loadslide: loadslide 1.1s var(--ease-brand) infinite;

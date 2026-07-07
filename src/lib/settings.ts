@@ -38,6 +38,8 @@ export const searchEngines: SearchEngine[] = [
   },
 ];
 
+import { loadJson, saveJson } from "./storage";
+
 export type BrowserSettings = {
   searchEngine: SearchEngineKey;
 };
@@ -53,20 +55,20 @@ export function engineFor(key: SearchEngineKey): SearchEngine {
 }
 
 export function loadSettings(): BrowserSettings {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...defaultSettings };
-    const parsed = JSON.parse(raw);
-    return {
-      searchEngine: searchEngines.some((engine) => engine.key === parsed.searchEngine)
-        ? parsed.searchEngine
-        : defaultSettings.searchEngine,
-    };
-  } catch {
-    return { ...defaultSettings };
-  }
+  return loadJson(
+    [KEY],
+    (raw): BrowserSettings | null => {
+      const key = (raw as { searchEngine?: unknown })?.searchEngine;
+      return {
+        searchEngine: searchEngines.some((engine) => engine.key === key)
+          ? (key as SearchEngineKey)
+          : defaultSettings.searchEngine,
+      };
+    },
+    () => ({ ...defaultSettings }),
+  );
 }
 
 export function saveSettings(settings: BrowserSettings) {
-  localStorage.setItem(KEY, JSON.stringify(settings));
+  saveJson(KEY, settings);
 }

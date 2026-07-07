@@ -3,13 +3,14 @@
 //! read-only and unauthenticated — 60 requests/hour per IP — so responses
 //! are cached in-process and every surface shares the same snapshot.
 
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::LazyLock;
+use std::time::Duration;
 
 use chrono::DateTime;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::cache::{get_or_fetch, TtlCache};
 use crate::http::{self, err};
 
 /// The app's home repository, `owner/name`. Mirrored in src/lib/github.ts.
@@ -43,30 +44,11 @@ pub struct Release {
     pub notes: String,
 }
 
-static STATS: Mutex<Option<(Instant, RepoStats)>> = Mutex::new(None);
-static RELEASES: Mutex<Option<(Instant, Vec<Release>)>> = Mutex::new(None);
-
-fn cached<T: Clone>(slot: &Mutex<Option<(Instant, T)>>) -> Option<T> {
-    let guard = slot.lock().ok()?;
-    match guard.as_ref() {
-        Some((at, value)) if at.elapsed() < TTL => Some(value.clone()),
-        _ => None,
-    }
-}
-
-fn store<T: Clone>(slot: &Mutex<Option<(Instant, T)>>, value: &T) {
-    if let Ok(mut guard) = slot.lock() {
-        *guard = Some((Instant::now(), value.clone()));
-    }
-}
-
-/// The last stored value regardless of age. GitHub's unauthenticated budget is
-/// 60 req/hr; when it's exhausted every call 403s, so on error we serve the
-/// last-good snapshot (stars barely move in 15 min) instead of an error and a
-/// blank widget.
-fn stale<T: Clone>(slot: &Mutex<Option<(Instant, T)>>) -> Option<T> {
-    slot.lock().ok()?.as_ref().map(|(_, value)| value.clone())
-}
+// Single-slot TTL caches (one fixed key each) shared by every surface. On an
+// exhausted 60 req/hr budget, get_or_fetch serves the last-good snapshot rather
+// than an error and a blank widget — stars barely move in 15 min.
+static STATS: LazyLock<TtlCache<RepoStats>> = LazyLock::new(|| TtlCache::new(TTL));
+static RELEASES: LazyLock<TtlCache<Vec<Release>>> = LazyLock::new(|| TtlCache::new(TTL));
 
 async fn api(path: &str) -> Result<Value, String> {
     let client = http::shared()?;
@@ -84,43 +66,33 @@ async fn api(path: &str) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn github_repo_stats() -> Result<RepoStats, String> {
-    if let Some(hit) = cached(&STATS) {
-        return Ok(hit);
-    }
-    let repo = match api(&format!("repos/{REPO}")).await {
-        Ok(repo) => repo,
-        Err(e) => return stale(&STATS).ok_or(e),
-    };
-    let stats = RepoStats {
-        stars: repo["stargazers_count"].as_u64().unwrap_or(0),
-        forks: repo["forks_count"].as_u64().unwrap_or(0),
-        open_issues: repo["open_issues_count"].as_u64().unwrap_or(0),
-    };
-    store(&STATS, &stats);
-    Ok(stats)
+    get_or_fetch(&STATS, "", async {
+        let repo = api(&format!("repos/{REPO}")).await?;
+        Ok(RepoStats {
+            stars: repo["stargazers_count"].as_u64().unwrap_or(0),
+            forks: repo["forks_count"].as_u64().unwrap_or(0),
+            open_issues: repo["open_issues_count"].as_u64().unwrap_or(0),
+        })
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn github_releases() -> Result<Vec<Release>, String> {
-    if let Some(hit) = cached(&RELEASES) {
-        return Ok(hit);
-    }
-    let list = match api(&format!("repos/{REPO}/releases?per_page=8")).await {
-        Ok(list) => list,
-        Err(e) => return stale(&RELEASES).ok_or(e),
-    };
-    let releases: Vec<Release> = list
-        .as_array()
-        .map(|entries| {
-            entries
-                .iter()
-                .filter(|r| !r["draft"].as_bool().unwrap_or(false))
-                .map(parse_release)
-                .collect()
-        })
-        .unwrap_or_default();
-    store(&RELEASES, &releases);
-    Ok(releases)
+    get_or_fetch(&RELEASES, "", async {
+        let list = api(&format!("repos/{REPO}/releases?per_page=8")).await?;
+        Ok(list
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|r| !r["draft"].as_bool().unwrap_or(false))
+                    .map(parse_release)
+                    .collect()
+            })
+            .unwrap_or_default())
+    })
+    .await
 }
 
 fn parse_release(r: &Value) -> Release {

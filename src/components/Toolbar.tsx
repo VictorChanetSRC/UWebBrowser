@@ -318,7 +318,7 @@ function ToolbarImpl(props: Props) {
         {open && (
           <div
             id={listId}
-            className="absolute inset-x-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 py-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
+            className="absolute inset-x-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 py-1.5 shadow-popover"
             role="listbox"
           >
             {rows.map((row, index) => (

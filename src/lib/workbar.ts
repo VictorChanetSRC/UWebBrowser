@@ -1,4 +1,6 @@
 import { sidebarSections, type LinkItem } from "./engines";
+import { loadJson, saveJson } from "./storage";
+import { moveBy, patchById, removeById } from "./list-ops";
 import {
   BAR_WIDGET_TYPES,
   newBarWidget,
@@ -48,56 +50,52 @@ export function seedWidgets(): Widget[] {
 }
 
 export function loadWidgets(): Widget[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
+  // The current board lives under KEY; pre-widget installs kept plain link
+  // sections under the pins keys. loadJson tries them in order — the validator
+  // routes each shape and returns null to fall through to the next key.
+  return loadJson<Widget[]>(
+    [KEY, PINS_KEY, LEGACY_PINS_KEY],
+    (raw) => {
+      if (!Array.isArray(raw)) return null;
+      const items = raw as Array<{ type?: unknown; label?: unknown; items?: unknown } | null>;
+      const looksLikeWidgets = items.some((w) => w && typeof w.type === "string");
+      if (looksLikeWidgets) {
         // The one-card Steam ticker split into a game card and a players
         // graph; expand stored copies into both so nobody loses a widget.
-        const expanded = parsed.flatMap((w) =>
+        const expanded = items.flatMap((w) =>
           w && w.type === "steam"
             ? [
                 { ...w, type: "steam-game" },
-                { id: uid(), type: "steam-players", gameId: w.gameId ?? null },
+                { id: uid(), type: "steam-players", gameId: (w as { gameId?: unknown }).gameId ?? null },
               ]
             : [w],
         );
         const widgets = expanded.filter(
-          (w): w is Widget => w && BAR_WIDGET_TYPES.includes(w.type),
+          (w): w is Widget => !!w && BAR_WIDGET_TYPES.includes(w.type as WidgetType),
         );
-        if (widgets.length > 0) {
-          if (expanded.length !== parsed.length) saveWidgets(widgets);
-          return widgets;
-        }
+        if (widgets.length === 0) return null;
+        if (expanded.length !== items.length) saveWidgets(widgets);
+        return widgets;
       }
-    }
-    // Migrate a pre-widget work bar: keep the link sections, add the live widgets.
-    const pins = localStorage.getItem(PINS_KEY) ?? localStorage.getItem(LEGACY_PINS_KEY);
-    if (pins) {
-      const sections = JSON.parse(pins);
-      if (Array.isArray(sections)) {
-        return [
-          ...statusWidgets(),
-          ...sections.map(
-            (section): Widget => ({
-              id: uid(),
-              type: "links",
-              label: String(section.label ?? "Links"),
-              items: Array.isArray(section.items) ? section.items : [],
-            }),
-          ),
-        ];
-      }
-    }
-  } catch {
-    // fall through to seed
-  }
-  return seedWidgets();
+      // Pre-widget work bar: keep the link sections, add the live widgets.
+      return [
+        ...statusWidgets(),
+        ...items.map(
+          (section): Widget => ({
+            id: uid(),
+            type: "links",
+            label: String(section?.label ?? "Links"),
+            items: Array.isArray(section?.items) ? section.items : [],
+          }),
+        ),
+      ];
+    },
+    () => seedWidgets(),
+  );
 }
 
 export function saveWidgets(widgets: Widget[]) {
-  localStorage.setItem(KEY, JSON.stringify(widgets));
+  saveJson(KEY, widgets);
 }
 
 export function addWidget(widgets: Widget[], type: WidgetType): Widget[] {
@@ -105,21 +103,15 @@ export function addWidget(widgets: Widget[], type: WidgetType): Widget[] {
 }
 
 export function removeWidget(widgets: Widget[], id: string): Widget[] {
-  return widgets.filter((w) => w.id !== id);
+  return removeById(widgets, id);
 }
 
 export function moveWidget(widgets: Widget[], id: string, dir: -1 | 1): Widget[] {
-  const from = widgets.findIndex((w) => w.id === id);
-  const to = from + dir;
-  if (from < 0 || to < 0 || to >= widgets.length) return widgets;
-  const next = [...widgets];
-  const [moved] = next.splice(from, 1);
-  next.splice(to, 0, moved);
-  return next;
+  return moveBy(widgets, id, dir);
 }
 
 export function updateWidget(widgets: Widget[], id: string, patch: Partial<Widget>): Widget[] {
-  return widgets.map((w) => (w.id === id ? ({ ...w, ...patch } as Widget) : w));
+  return patchById(widgets, id, patch);
 }
 
 /* ----- pinned links, shared with the toolbar pin button and Discover ----- */

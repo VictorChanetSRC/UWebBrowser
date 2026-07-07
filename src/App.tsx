@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -22,8 +24,12 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
 import { GITHUB_REPO_URL } from "./lib/github";
-import { TerminalView } from "./components/TerminalView";
-import { pruneTerminals } from "./lib/terminal";
+// Lazy so xterm (one of the heaviest deps) and the terminal module split into
+// their own chunk, loaded only when a terminal tab is actually opened — not in
+// the cold-start bundle every launch pays for.
+const TerminalView = lazy(() =>
+  import("./components/TerminalView").then((m) => ({ default: m.TerminalView })),
+);
 import { ipc } from "./lib/ipc";
 import { loadConfig, saveConfig, type UwbConfig } from "./lib/config";
 import { loadSession, saveSession } from "./lib/session";
@@ -221,12 +227,16 @@ export default function App() {
   }, []);
 
   // Kill PTY sessions whose tab is gone (closed, or navigated away from
-  // uwb://terminal). Creation happens in TerminalView on first mount.
+  // uwb://terminal). Creation happens in TerminalView on first mount. The
+  // terminal module is imported lazily so xterm stays out of cold start until a
+  // terminal has actually existed — before that there are no sessions to prune.
+  const terminalLoaded = useRef(false);
   useEffect(() => {
-    const alive = new Set(
-      tabs.filter((t) => t.kind === "home" && t.url === TERMINAL_URL).map((t) => t.id),
-    );
-    pruneTerminals(alive);
+    const termTabs = tabs.filter((t) => t.kind === "home" && t.url === TERMINAL_URL);
+    if (termTabs.length === 0 && !terminalLoaded.current) return;
+    terminalLoaded.current = true;
+    const alive = new Set(termTabs.map((t) => t.id));
+    import("./lib/terminal").then((m) => m.pruneTerminals(alive));
   }, [tabs]);
 
   const tabsRef = useRef(tabs);
@@ -1046,18 +1056,21 @@ export default function App() {
           )}
 
           {/* Terminal tabs stay mounted while hidden so their shell keeps
-              running and scrollback survives tab switches. */}
-          {tabs
-            .filter((t) => t.kind === "home" && t.url === TERMINAL_URL)
-            .map((t) => (
-              <div
-                key={t.id}
-                className="absolute inset-0"
-                style={{ display: t.id === activeTab.id ? "block" : "none" }}
-              >
-                <TerminalView id={t.id} active={t.id === activeTab.id} />
-              </div>
-            ))}
+              running and scrollback survives tab switches. Suspense covers the
+              lazy chunk's first load. */}
+          <Suspense fallback={null}>
+            {tabs
+              .filter((t) => t.kind === "home" && t.url === TERMINAL_URL)
+              .map((t) => (
+                <div
+                  key={t.id}
+                  className="absolute inset-0"
+                  style={{ display: t.id === activeTab.id ? "block" : "none" }}
+                >
+                  <TerminalView id={t.id} active={t.id === activeTab.id} />
+                </div>
+              ))}
+          </Suspense>
 
           {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
 
@@ -1069,7 +1082,7 @@ export default function App() {
             aria-live="polite"
           >
             {toast && (
-              <div className="animate-rise rounded-lg border border-ink-800 bg-ink-900 px-4 py-2 text-[12.5px] text-ink-200 shadow-[0_16px_40px_rgba(0,0,0,0.5)]">
+              <div className="animate-rise rounded-lg border border-ink-800 bg-ink-900 px-4 py-2 text-[12.5px] text-ink-200 shadow-popover">
                 {toast}
               </div>
             )}

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { discoverCatalog } from "../lib/discover";
 import type { LinkItem } from "../lib/engines";
 import { LinkCard, LinkGrid } from "./LinkCard";
 import { SearchField } from "./SearchField";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/utils";
 
@@ -14,24 +15,42 @@ type Props = {
   onTogglePin: (item: LinkItem) => void;
 };
 
+// The searchable text for every catalog item, lowercased once at module load
+// instead of rebuilt for all 66 items on every keystroke.
+const SEARCH_INDEX = discoverCatalog.map((group) => ({
+  group,
+  items: group.items.map((item) => ({
+    item,
+    text: `${item.name} ${item.hint ?? ""} ${group.category}`.toLowerCase(),
+  })),
+}));
+
 export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
 
   const q = query.trim().toLowerCase();
   // Match counts per category ignore the category filter, so the rail keeps
-  // showing where else the search hits while one category is selected.
-  const matches = discoverCatalog.map((group) => ({
-    ...group,
-    items: group.items.filter(
-      (item) =>
-        !q ||
-        `${item.name} ${item.hint ?? ""} ${group.category}`.toLowerCase().includes(q),
-    ),
-  }));
-  const total = matches.reduce((sum, group) => sum + group.items.length, 0);
-  const groups = matches.filter(
-    (group) => group.items.length > 0 && (!category || group.category === category),
+  // showing where else the search hits while one category is selected. Memoized
+  // so a pin toggle (which re-renders with new pinnedUrls) doesn't refilter.
+  const matches = useMemo(
+    () =>
+      SEARCH_INDEX.map(({ group, items }) => ({
+        ...group,
+        items: q ? items.filter((e) => e.text.includes(q)).map((e) => e.item) : group.items,
+      })),
+    [q],
+  );
+  const total = useMemo(
+    () => matches.reduce((sum, group) => sum + group.items.length, 0),
+    [matches],
+  );
+  const groups = useMemo(
+    () =>
+      matches.filter(
+        (group) => group.items.length > 0 && (!category || group.category === category),
+      ),
+    [matches, category],
   );
 
   const pick = (next: string | null) =>
@@ -40,16 +59,11 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
   return (
     <div className="absolute inset-0 @container overflow-y-auto">
       <div className="mx-auto flex max-w-[1460px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
-        <header>
-          <Label>Discover</Label>
-          <h1 className="my-2.5 text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-            The Unreal dev toolbox.
-          </h1>
-          <p className="text-ink-400">
-            Curated tools, assets, learning and communities for Unreal Engine developers.
-            Pin anything to your work bar.
-          </p>
-        </header>
+        <PageHeader
+          kicker="Discover"
+          title="The Unreal dev toolbox."
+          description="Curated tools, assets, learning and communities for Unreal Engine developers. Pin anything to your work bar."
+        />
 
         {/* Wide windows trade the chip row for a sticky category rail. */}
         <div className="grid gap-x-12 gap-y-9 @4xl:grid-cols-[220px_minmax(0,1fr)] @4xl:items-start">

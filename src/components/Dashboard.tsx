@@ -33,6 +33,7 @@ import {
 } from "@/widgets/dashboard";
 import { DashboardShop } from "./WidgetShop";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Section } from "@/components/ui/section";
@@ -104,20 +105,7 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
   }, [widgets]);
   useEffect(() => () => saveDashboard(widgetsRef.current), []);
 
-  const [confirmReset, setConfirmReset] = useState(false);
-  const resetTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
-
-  const reset = () => {
-    if (!confirmReset) {
-      setConfirmReset(true);
-      window.clearTimeout(resetTimer.current);
-      resetTimer.current = window.setTimeout(() => setConfirmReset(false), 4000);
-      return;
-    }
-    setConfirmReset(false);
-    setWidgets(seedDashboard(config.games));
-  };
+  const resetLayout = useConfirm(() => setWidgets(seedDashboard(config.games)));
 
   const setup = !config.done || editing;
 
@@ -261,10 +249,14 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
                   <Button
                     variant="link"
                     size="none"
-                    className="text-[12px] font-normal"
-                    onClick={reset}
+                    className={cn(
+                      "text-[12px] font-normal",
+                      resetLayout.armed && "text-signal-300 hover:text-signal-200",
+                    )}
+                    onClick={resetLayout.trigger}
+                    aria-live="polite"
                   >
-                    {confirmReset ? "Click again to reset" : "Reset layout"}
+                    {resetLayout.armed ? "Click again to reset" : "Reset layout"}
                   </Button>
                 </section>
               )}
@@ -486,7 +478,7 @@ function BentoTile({
                 onNudge(1);
               }
             }}
-            className="absolute inset-x-2 top-2 flex items-center gap-2 rounded-[10px] border border-border bg-ink-900/95 py-1 pl-2.5 pr-1 shadow-[0_10px_28px_rgba(0,0,0,0.4)] backdrop-blur"
+            className="absolute inset-x-2 top-2 flex items-center gap-2 rounded-[10px] border border-border bg-ink-900/95 py-1 pl-2.5 pr-1 shadow-strip backdrop-blur"
           >
             <span className="w-5 flex-none font-mono text-[10.5px] tabular-nums text-ink-500">
               {String(index + 1).padStart(2, "0")}

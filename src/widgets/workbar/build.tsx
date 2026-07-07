@@ -3,13 +3,13 @@ import { Hammer } from "lucide-react";
 import { ipc, type EngineInstall } from "@/lib/ipc";
 import { matchEngine, mergeEngines, type UnrealProject } from "@/lib/unreal";
 import {
-  buildJobRunning,
   cancelBuildJob,
   jobProgressCaption,
   jobProgressValue,
   jobRunning,
   jobStatusLabel,
-  startBuildJob,
+  jobVerdictClass,
+  packageProject,
 } from "@/lib/build-job";
 import { elapsedSince } from "@/lib/format";
 import { useBuildJob } from "@/hooks/use-build-job";
@@ -56,16 +56,9 @@ function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
   const running = job !== null && jobRunning(job);
 
   const packageGame = () => {
-    if (!project || !engine || buildJobRunning()) return;
+    if (!project || !engine) return;
     setError(null);
-    startBuildJob(project.name, {
-      enginePath: engine.path,
-      uproject: project.uprojectPath,
-      action: "package",
-      config: "Development",
-      platform: "Win64",
-      archiveDir: project.archiveDir || undefined,
-    });
+    packageProject(project, engine);
   };
 
   const openEditor = async () => {
@@ -137,11 +130,9 @@ function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
         <span
           className={cn(
             "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px]",
-            !running && job.exitCode !== 0 && !job.cancelRequested
-              ? "font-medium text-signal-400"
-              : !running && job.exitCode === 0
-                ? "font-medium text-ink-100"
-                : "text-ink-300",
+            running || job.cancelRequested
+              ? "text-ink-300"
+              : cn("font-medium", jobVerdictClass(job)),
           )}
         >
           {jobStatusLabel(job)}

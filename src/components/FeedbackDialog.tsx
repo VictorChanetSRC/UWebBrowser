@@ -65,7 +65,7 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label="Send feedback"
-        className="w-[520px] max-w-[calc(100%-48px)] animate-rise rounded-2xl border border-ink-800 bg-ink-900 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+        className="w-[520px] max-w-[calc(100%-48px)] animate-rise rounded-2xl border border-ink-800 bg-ink-900 p-6 shadow-modal"
       >
         <div className="flex items-start justify-between gap-4">
           <div>

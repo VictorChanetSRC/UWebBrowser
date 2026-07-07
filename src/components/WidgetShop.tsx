@@ -78,8 +78,10 @@ type ShopProps<T extends string> = {
   /** Total widgets on the surface, for the rail summary. */
   total: number;
   onAdd: (type: T) => void;
-  /** A live widget body at its natural size; the shop scales it to fit. */
-  renderPreview: (type: T) => ReactNode;
+  /** A widget body at its natural size; the shop scales it to fit. `live` is
+   *  true only for the single focused detail preview — grid cards render inert
+   *  so opening the shop doesn't spin up a poll per card. */
+  renderPreview: (type: T, live: boolean) => ReactNode;
   /** Stage heights for the live previews, per placement. */
   previewHeights: { card: number; detail: number };
   /** Mono line under the detail preview frame. */
@@ -339,7 +341,7 @@ export function WidgetShop<T extends string>({
                           setView({ kind: "detail", type: entry.type, fromAuthor: author.id })
                         }
                         onAdd={() => add(entry.type)}
-                        preview={renderPreview(entry.type)}
+                        preview={renderPreview(entry.type, false)}
                         previewHeight={previewHeights.card}
                       />
                     ))}
@@ -362,7 +364,7 @@ export function WidgetShop<T extends string>({
                   })
                 }
                 onAdd={() => add(detailEntry.type)}
-                preview={renderPreview(detailEntry.type)}
+                preview={renderPreview(detailEntry.type, true)}
                 previewHeight={previewHeights.detail}
                 previewCaption={previewCaption}
               />
@@ -409,7 +411,7 @@ export function WidgetShop<T extends string>({
                         onOpen={() => setView({ kind: "detail", type: entry.type })}
                         onAuthor={() => setView({ kind: "author", id: entry.creator.id })}
                         onAdd={() => add(entry.type)}
-                        preview={renderPreview(entry.type)}
+                        preview={renderPreview(entry.type, false)}
                         previewHeight={previewHeights.card}
                       />
                     ))}
@@ -843,7 +845,7 @@ export function DashboardShop({
       }}
       previewHeights={{ card: 220, detail: 448 }}
       previewCaption="Live preview at the tile's starting size · resize freely on the board"
-      renderPreview={(type) => {
+      renderPreview={(type, live) => {
         // Stable spec instances, so poll state survives re-renders.
         const widget = dashPreview(type);
         return (
@@ -859,7 +861,7 @@ export function DashboardShop({
               widget={widget}
               games={games}
               itchApiKey={itchApiKey}
-              active
+              active={live}
               onOpen={noop}
               onUnreal={noop}
               onEditSetup={noop}
@@ -915,14 +917,14 @@ export function WorkbarShop({
       }}
       previewHeights={{ card: 220, detail: 360 }}
       previewCaption="Live preview at the exact width of your side rail"
-      renderPreview={(type) => (
+      renderPreview={(type, live) => (
         <div className="pointer-events-none w-[220px] select-none" aria-hidden>
           {/* Stable spec instances, so poll state survives re-renders. */}
           <BarWidgetBody
             widget={barPreview(type)}
             games={games}
             itchApiKey={itchApiKey}
-            active
+            active={live}
             onOpen={noop}
             onUnreal={noop}
           />

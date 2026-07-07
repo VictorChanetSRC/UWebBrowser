@@ -19,13 +19,20 @@ export function FindBar({ tabId, onClose }: { tabId: string; onClose: () => void
     inputRef.current?.select();
   }, [tabId]);
 
+  const empty = query.trim() === "";
+
   const search = (forward: boolean, fromStart: boolean) => {
+    if (empty) return;
     ipc.tabFind(tabId, query, forward, fromStart).catch(() => {});
   };
 
-  // Restart the search from the top on every query change.
+  // Restart the search from the top on every query change, debounced so a fast
+  // typist doesn't fire (and re-highlight) a search on every keystroke.
   useEffect(() => {
-    ipc.tabFind(tabId, query, true, true).catch(() => {});
+    const timer = window.setTimeout(() => {
+      ipc.tabFind(tabId, query, true, true).catch(() => {});
+    }, 140);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
@@ -35,7 +42,7 @@ export function FindBar({ tabId, onClose }: { tabId: string; onClose: () => void
   };
 
   return (
-    <div className="pointer-events-auto flex items-center gap-1 rounded-b-lg border border-t-0 border-ink-800 bg-ink-900 px-2 py-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.4)]">
+    <div className="pointer-events-auto flex items-center gap-1 rounded-b-lg border border-t-0 border-ink-800 bg-ink-900 px-2 py-1.5 shadow-popover">
       <input
         ref={inputRef}
         value={query}
@@ -53,10 +60,10 @@ export function FindBar({ tabId, onClose }: { tabId: string; onClose: () => void
         aria-label="Find in page"
         className="w-48 bg-transparent px-1 text-[13px] text-ink-100 outline-none placeholder:text-ink-500"
       />
-      <IconButton label="Previous match" onClick={() => search(false, false)}>
+      <IconButton label="Previous match" disabled={empty} onClick={() => search(false, false)}>
         <ChevronUp className="h-4 w-4" />
       </IconButton>
-      <IconButton label="Next match" onClick={() => search(true, false)}>
+      <IconButton label="Next match" disabled={empty} onClick={() => search(true, false)}>
         <ChevronDown className="h-4 w-4" />
       </IconButton>
       <IconButton label="Close find bar" onClick={close}>

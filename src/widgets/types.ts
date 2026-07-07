@@ -1,3 +1,4 @@
+import type { Game } from "@/lib/config";
 import type { ShopCategoryKey, ShopFact } from "@/lib/widget-shop";
 
 /**
@@ -30,3 +31,10 @@ export type WidgetShopInfo = {
   /** Whether a second copy makes sense on one surface. */
   repeatable: boolean;
 };
+
+/** The game a widget tracks: its explicit pick, or the first game on the setup
+ *  (so a fresh, gameId:null widget follows the primary game for free). Shared
+ *  by every game-tracking widget on both surfaces. */
+export function trackedGame(gameId: string | null, games: Game[]): Game | null {
+  return games.find((g) => g.id === gameId) ?? games[0] ?? null;
+}
