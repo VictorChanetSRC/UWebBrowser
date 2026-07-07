@@ -679,7 +679,7 @@ pub async fn ext_open_popup(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    use tauri::webview::{NewWindowResponse, PageLoadEvent};
+    use tauri::webview::NewWindowResponse;
     use tauri::{LogicalPosition, LogicalSize, Url, WebviewUrl};
 
     // Guard against a bad runtime id: an empty/short id yields
@@ -713,65 +713,23 @@ pub async fn ext_open_popup(
 
     let window = app.get_window("main").ok_or("main window not found")?;
     let target = format!("chrome-extension://{id}/{popup}");
-    let parsed = Url::parse(&target).map_err(|e| e.to_string())?;
 
-    // Start at about:blank and navigate to the extension only once that
-    // placeholder has finished loading. WebView2 rejects a chrome-extension://
-    // URL as a webview's *initial* source (and while the webview is still
-    // initializing) and falls back to its new-tab page — chrome-search://
-    // local-ntp, which then itself errors with ERR_INVALID_URL. A navigation
-    // issued *after* about:blank is fully live resolves reliably, so that is the
-    // only place we navigate from. There is deliberately no eager navigate right
-    // after `add_child`: that one raced the initial load and was the cause of
-    // the intermittent white / "can't reach this page" popups.
+    // Create the popup at about:blank — a safe *initial* source — then drive the
+    // real navigation natively once CoreWebView2 is initialized (see
+    // `webext::navigate_popup`). WebView2 rejects a chrome-extension:// URL as a
+    // webview's initial source, and navigating too eagerly (through wry, right
+    // after add_child) races the engine's own about:blank init and gets bounced
+    // to the new-tab page — chrome-search://local-ntp / ERR_INVALID_URL — which
+    // was the intermittent white / "can't reach this page" popup. A post-init
+    // native Navigate is accepted reliably.
     let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
     let w = width.max(120.0);
     let h = height.max(120.0);
-    let nav_target = parsed.clone();
     let app_new = app.clone();
-    // Bounded self-heal: if WebView2 still manages to fall back to the NTP, we
-    // re-issue the navigation, but cap the attempts so a genuinely unreachable
-    // popup can't spin forever.
-    let ntp_retries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    const MAX_NTP_RETRIES: usize = 3;
     let mut builder =
         tauri::webview::WebviewBuilder::new(EXT_POPUP_LABEL, WebviewUrl::External(blank))
             .browser_extensions_enabled(true)
             .disable_drag_drop_handler()
-            .on_page_load(move |webview, payload| {
-                if !matches!(payload.event(), PageLoadEvent::Finished) {
-                    return;
-                }
-                match payload.url().scheme() {
-                    // about:blank finished → now navigate to the real popup.
-                    // This fires on the main thread once the placeholder is
-                    // live, so the navigate always lands.
-                    "about" => {
-                        let _ = webview.navigate(nav_target.clone());
-                    }
-                    // The extension page itself finished loading. A freshly
-                    // created child webview can stay blank in release builds
-                    // until its controller bounds change, and the only reliable
-                    // moment to force that first paint is *after* real content
-                    // is present — nudging earlier just paints the white
-                    // about:blank frame and the popup content never repaints
-                    // (in dev, open_devtools masked this by forcing relayouts).
-                    // Done natively (SetBounds ×2 on the UI thread); a Tauri
-                    // set_size jiggle coalesces to no net change and is skipped.
-                    "chrome-extension" => {
-                        crate::webext::force_repaint(&webview);
-                    }
-                    // WebView2 fell back to its new-tab page (chrome-search://
-                    // local-ntp) — the navigation didn't take. Retry, bounded.
-                    "chrome-search" => {
-                        let n = ntp_retries.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if n < MAX_NTP_RETRIES {
-                            let _ = webview.navigate(nav_target.clone());
-                        }
-                    }
-                    _ => {}
-                }
-            })
             // The popup's "sign in" buttons open the auth page via
             // window.open/chrome.tabs.create; without a handler WebView2 drops
             // the request (why sign-in did nothing). Route it to a real tab —
@@ -798,12 +756,12 @@ pub async fn ext_open_popup(
             LogicalSize::new(w, h),
         )
         .map_err(|e| e.to_string())?;
-    // Navigation is driven entirely from the on_page_load handler above (once
-    // about:blank is live), and it also owns the paint-forcing bounds nudge
-    // fired when the extension page finishes loading. We deliberately do NOT
-    // eagerly navigate here — that raced the initial load and produced the
-    // intermittent blank / NTP-fallback popups.
-    //
+    // Now that the child webview exists, navigate it to the extension page
+    // natively (post-init → accepted, never bounced to the NTP) and force the
+    // first paint from NavigationCompleted. This runs once CoreWebView2 is
+    // ready, so it doesn't depend on wry's page-load events firing for
+    // about:blank.
+    crate::webext::navigate_popup(&popup_view, target);
     // Dev-only: surface the popup's console so a blank extension page (usually a
     // service-worker/`chrome.runtime` failure) can be diagnosed.
     #[cfg(debug_assertions)]

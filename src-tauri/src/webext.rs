@@ -37,19 +37,23 @@ pub fn set_zoom(webview: &Webview, factor: f64) {
     });
 }
 
-/// Force a first paint on a freshly-created child webview that WebView2 leaves
-/// blank until its controller bounds actually change. Nudges the *native*
-/// controller bounds by 1px and back, synchronously on the UI thread — going
-/// through Tauri's `set_size` instead coalesces the two calls into no net
-/// change, so WebView2 skips the resize and never repaints (this is why the
-/// extension popup stayed white in release). No-op off Windows.
+/// Navigate a freshly-created extension-popup child webview to its
+/// `chrome-extension://` page the reliable way: natively, once CoreWebView2 is
+/// initialized. Driving this through wry — or navigating eagerly right after
+/// `add_child` — races the engine's own about:blank init; WebView2 then treats
+/// the chrome-extension URL like an initial source, rejects it, and falls back
+/// to its new-tab page (chrome-search://local-ntp, which itself errors with
+/// ERR_INVALID_URL). A native `Navigate` issued after init is accepted. We also
+/// register a one-shot `NavigationCompleted` handler that forces the first
+/// paint (a fresh child webview stays blank until its controller bounds change).
+/// No-op off Windows.
 #[cfg(windows)]
-pub fn force_repaint(webview: &Webview) {
-    let _ = webview.with_webview(|pw| unsafe { imp::force_repaint(&pw) });
+pub fn navigate_popup(webview: &Webview, url: String) {
+    let _ = webview.with_webview(move |pw| unsafe { imp::navigate_popup(&pw, &url) });
 }
 
 #[cfg(not(windows))]
-pub fn force_repaint(_webview: &Webview) {}
+pub fn navigate_popup(_webview: &Webview, _url: String) {}
 
 #[cfg(not(windows))]
 pub fn set_zoom(_webview: &Webview, _factor: f64) {}
@@ -87,8 +91,8 @@ mod imp {
     };
     use webview2_com::{
         AcceleratorKeyPressedEventHandler, DownloadStartingEventHandler,
-        FaviconChangedEventHandler, ProcessFailedEventHandler, StateChangedEventHandler,
-        TrySuspendCompletedHandler,
+        FaviconChangedEventHandler, NavigationCompletedEventHandler, ProcessFailedEventHandler,
+        StateChangedEventHandler, TrySuspendCompletedHandler,
     };
     use windows::core::Interface;
     use windows::Win32::Foundation::RECT;
@@ -108,20 +112,41 @@ mod imp {
         (GetKeyState(vk as i32) as u16 & 0x8000) != 0
     }
 
-    pub unsafe fn force_repaint(pw: &PlatformWebview) {
-        let controller = pw.controller();
+    /// Nudge the controller bounds 1px and back, synchronously on the UI
+    /// thread, to force WebView2's first paint of a fresh child webview. Two
+    /// distinct SetBounds calls: the intermediate (1px shorter) rect makes the
+    /// engine register a genuine size change and paint, then we restore the
+    /// real rect. Neither can be coalesced away (unlike a Tauri set_size pair).
+    unsafe fn nudge_bounds(controller: &ICoreWebView2Controller) {
         let mut bounds = RECT::default();
         if controller.Bounds(&mut bounds).is_err() {
             return;
         }
-        // Two distinct, synchronous SetBounds calls: the intermediate (1px
-        // shorter) rect makes WebView2 register a genuine size change and
-        // paint, then we restore the real rect. Both run on the UI thread
-        // inside this callback, so neither can be coalesced away.
         let mut nudged = bounds;
         nudged.bottom -= 1;
         let _ = controller.SetBounds(nudged);
         let _ = controller.SetBounds(bounds);
+    }
+
+    pub unsafe fn navigate_popup(pw: &PlatformWebview, url: &str) {
+        let controller = pw.controller();
+        let Ok(core) = controller.CoreWebView2() else {
+            return;
+        };
+        // Force the first paint whenever a navigation completes (about:blank and
+        // then the real extension page): the child otherwise stays blank until
+        // its bounds change. NavigationCompleted fires on the UI thread, so the
+        // synchronous bounds nudge is safe here.
+        let controller_for_paint = controller.clone();
+        let handler = NavigationCompletedEventHandler::create(Box::new(move |_sender, _args| {
+            nudge_bounds(&controller_for_paint);
+            Ok(())
+        }));
+        let mut token = 0i64;
+        let _ = core.add_NavigationCompleted(&handler, &mut token);
+        // Post-init native navigate → accepted, no NTP fallback.
+        let wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+        let _ = core.Navigate(windows::core::PCWSTR(wide.as_ptr()));
     }
 
     pub unsafe fn suspend(pw: &PlatformWebview) {
