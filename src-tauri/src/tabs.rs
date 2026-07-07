@@ -186,6 +186,14 @@ pub async fn create_tab(
         })
         .on_page_load(move |_webview, payload| {
             let started = matches!(payload.event(), PageLoadEvent::Started);
+            // Never surface a non-navigable URL (about:blank etc.) as the tab's
+            // address. `on_navigation` already cancels these, but WebView2's
+            // NavigationStarting is documented to sometimes skip about:blank —
+            // this is the backstop so a blank load can't paint the omnibox.
+            let navigable = matches!(payload.url().scheme(), "http" | "https" | "file" | "uwb");
+            if !navigable {
+                return;
+            }
             emit_tab_event(&app_load, &id_load, "loading", started.to_string());
             if !started {
                 emit_tab_event(&app_load, &id_load, "url", payload.url().to_string());

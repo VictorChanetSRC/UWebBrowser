@@ -371,6 +371,12 @@ export default function App() {
         if (id === activeIdRef.current) ipc.activateTab(null).catch(() => {});
         return;
       }
+      if (kind === "url" && (!value || value === "about:blank" || !isNavigableUrl(value))) {
+        // A blank / non-navigable hop (a denied popup's leftover, an anti-embed
+        // bounce). Don't record it in history or move the omnibox onto a white
+        // page — the backend already refuses to drive the frame there.
+        return;
+      }
       const current = tabsRef.current.find((t) => t.id === id);
       if (current) {
         if (kind === "url") recordVisit(value, "");
@@ -441,7 +447,10 @@ export default function App() {
       ipc
         .tabLiveUrl(tab.id)
         .then((url) => {
-          if (!url) return;
+          // Ignore a blank/non-navigable live URL: a page that briefly bounced
+          // through about:blank (a denied popup's leftover, an anti-embed hop)
+          // must not overwrite the tab's real address with a white page.
+          if (!url || url === "about:blank" || !isNavigableUrl(url)) return;
           setTabs((prev) =>
             prev.map((t) => (t.id === tab.id && t.url !== url ? { ...t, url } : t)),
           );
