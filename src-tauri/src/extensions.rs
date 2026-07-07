@@ -715,21 +715,25 @@ pub async fn ext_open_popup(
     let target = format!("chrome-extension://{id}/{popup}");
     let parsed = Url::parse(&target).map_err(|e| e.to_string())?;
 
-    // Start at about:blank and navigate afterward: WebView2 rejects a
-    // chrome-extension:// URL as a webview's *initial* source and falls back to
-    // its new-tab page, but a post-creation navigation to it resolves fine.
+    // Start at about:blank and navigate to the extension only once that
+    // placeholder has finished loading. WebView2 rejects a chrome-extension://
+    // URL as a webview's *initial* source (and while the webview is still
+    // initializing) and falls back to its new-tab page — chrome-search://
+    // local-ntp, which then itself errors with ERR_INVALID_URL. A navigation
+    // issued *after* about:blank is fully live resolves reliably, so that is the
+    // only place we navigate from. There is deliberately no eager navigate right
+    // after `add_child`: that one raced the initial load and was the cause of
+    // the intermittent white / "can't reach this page" popups.
     let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
-    // Redo the navigation from the placeholder's page-load event. This command
-    // runs off the main thread, so the eager `navigate()` below is only *queued*
-    // (see send_user_message in tauri-runtime-wry) and races the webview's
-    // initial about:blank load — in release builds it loses that race and the
-    // popup stays blank (it only appeared to work in dev because the extra
-    // queued open_devtools message shifted the timing). This callback fires on
-    // the main thread once about:blank is live, so its navigate always lands.
     let w = width.max(120.0);
     let h = height.max(120.0);
     let nav_target = parsed.clone();
     let app_new = app.clone();
+    // Bounded self-heal: if WebView2 still manages to fall back to the NTP, we
+    // re-issue the navigation, but cap the attempts so a genuinely unreachable
+    // popup can't spin forever.
+    let ntp_retries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    const MAX_NTP_RETRIES: usize = 3;
     let mut builder =
         tauri::webview::WebviewBuilder::new(EXT_POPUP_LABEL, WebviewUrl::External(blank))
             .browser_extensions_enabled(true)
@@ -739,8 +743,9 @@ pub async fn ext_open_popup(
                     return;
                 }
                 match payload.url().scheme() {
-                    // about:blank finished → redo the navigation to the real
-                    // popup now that a post-creation navigate resolves.
+                    // about:blank finished → now navigate to the real popup.
+                    // This fires on the main thread once the placeholder is
+                    // live, so the navigate always lands.
                     "about" => {
                         let _ = webview.navigate(nav_target.clone());
                     }
@@ -755,6 +760,14 @@ pub async fn ext_open_popup(
                     // set_size jiggle coalesces to no net change and is skipped.
                     "chrome-extension" => {
                         crate::webext::force_repaint(&webview);
+                    }
+                    // WebView2 fell back to its new-tab page (chrome-search://
+                    // local-ntp) — the navigation didn't take. Retry, bounded.
+                    "chrome-search" => {
+                        let n = ntp_retries.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if n < MAX_NTP_RETRIES {
+                            let _ = webview.navigate(nav_target.clone());
+                        }
                     }
                     _ => {}
                 }
@@ -785,11 +798,12 @@ pub async fn ext_open_popup(
             LogicalSize::new(w, h),
         )
         .map_err(|e| e.to_string())?;
-    // Fast path: usually lands immediately. The on_page_load handler above is
-    // the reliability net for when this queued navigate loses the race, and it
-    // also owns the paint-forcing size jiggle (fired once the extension page
-    // itself finishes loading — see the `chrome-extension` arm above).
-    popup_view.navigate(parsed).map_err(|e| e.to_string())?;
+    // Navigation is driven entirely from the on_page_load handler above (once
+    // about:blank is live), and it also owns the paint-forcing bounds nudge
+    // fired when the extension page finishes loading. We deliberately do NOT
+    // eagerly navigate here — that raced the initial load and produced the
+    // intermittent blank / NTP-fallback popups.
+    //
     // Dev-only: surface the popup's console so a blank extension page (usually a
     // service-worker/`chrome.runtime` failure) can be diagnosed.
     #[cfg(debug_assertions)]
