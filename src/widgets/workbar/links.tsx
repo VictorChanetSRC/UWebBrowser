@@ -17,6 +17,12 @@ export type LinksWidget = {
   items: LinkItem[];
 };
 
+/** The domain shown on a pinned link: the hostname without a leading `www.`,
+ *  so `https://www.reddit.com/r/unrealengine/` reads as `reddit.com`. */
+function domainOf(url: string): string {
+  return hostOf(url).replace(/^www\./, "");
+}
+
 function LinksBody({ widget, onOpen }: BarBodyProps<LinksWidget>) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -25,13 +31,15 @@ function LinksBody({ widget, onOpen }: BarBodyProps<LinksWidget>) {
           key={item.url}
           className="group flex min-w-0 items-center gap-2.5 rounded-[7px] px-2 py-1.5 text-left text-[13px] text-ink-300 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100 active:translate-x-px"
           onClick={() => onOpen(item.url)}
-          title={item.hint ?? item.url}
+          title={item.hint ?? item.name}
         >
           <Favicon
             url={item.url}
             className="size-[15px] rounded-[3px] opacity-70 grayscale transition-[filter,opacity] duration-[130ms] ease-brand group-hover:opacity-100 group-hover:grayscale-0"
           />
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+            {domainOf(item.url)}
+          </span>
         </button>
       ))}
     </div>
