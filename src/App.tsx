@@ -72,6 +72,7 @@ export const SETTINGS_URL = "uwb://settings";
 export const WORKBAR_URL = "uwb://workbar";
 export const TERMINAL_URL = "uwb://terminal";
 export const HISTORY_URL = "uwb://history";
+const DISCORD_INVITE_URL = "https://discord.gg/bAeGFv4VBB";
 const TOP_INSET = 92; // 44px title bar + 48px toolbar
 const EXT_BAR_HEIGHT = 34; // pinned extensions strip, when shown
 const FIND_BAR_HEIGHT = 44; // reserved strip for the find-in-page bar
@@ -336,7 +337,15 @@ export default function App() {
         // Internal pages render in the chrome; just clear the content area.
         ipc.activateTab(null).catch(() => {});
       }
-      setTabs((prev) => [...prev, tab]);
+      // Insert directly to the right of the active tab (Chrome/Firefox
+      // behaviour), not at the very end of the strip.
+      setTabs((prev) => {
+        const at = prev.findIndex((t) => t.id === activeIdRef.current);
+        if (at === -1) return [...prev, tab];
+        const next = [...prev];
+        next.splice(at + 1, 0, tab);
+        return next;
+      });
       setActiveId(tab.id);
     },
     [],
@@ -723,6 +732,7 @@ export default function App() {
   const goHistory = useCallback(() => goInternal(HISTORY_URL), [goInternal]);
   const goHome = useCallback(() => goInternal(HOME_URL), [goInternal]);
   const goGithub = useCallback(() => openNewTab(GITHUB_REPO_URL), [openNewTab]);
+  const goDiscord = useCallback(() => openNewTab(DISCORD_INVITE_URL), [openNewTab]);
   const onBack = useCallback(() => withWebTab((id) => ipc.goBack(id)), [withWebTab]);
   const onForward = useCallback(() => withWebTab((id) => ipc.goForward(id)), [withWebTab]);
   const onReload = useCallback(() => withWebTab((id) => ipc.reload(id)), [withWebTab]);
@@ -922,6 +932,7 @@ export default function App() {
         onDevtools={onDevtools}
         onDownloadsPanelOpen={onDownloadsPanelOpen}
         onGithub={goGithub}
+        onDiscord={goDiscord}
         onInstallExtension={installExtensionFromStore}
       />
       {showExtBar && (

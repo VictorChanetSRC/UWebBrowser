@@ -1,4 +1,4 @@
-import { sidebarSections, type LinkItem } from "./engines";
+import { type LinkItem } from "./engines";
 import { loadJson, saveJson } from "./storage";
 import { moveBy, patchById, removeById } from "./list-ops";
 import {
@@ -34,19 +34,10 @@ const statusWidgets = (): Widget[] => [
   { id: uid(), type: "system" },
 ];
 
-/** First-run work bar: live widgets on top, curated link lists below. */
+/** First-run work bar: live status widgets only. Link lists start empty —
+ *  users pin the pages they care about with the toolbar star. */
 export function seedWidgets(): Widget[] {
-  return [
-    ...statusWidgets(),
-    ...sidebarSections().map(
-      (section): Widget => ({
-        id: uid(),
-        type: "links",
-        label: section.label,
-        items: section.items,
-      }),
-    ),
-  ];
+  return [...statusWidgets()];
 }
 
 export function loadWidgets(): Widget[] {

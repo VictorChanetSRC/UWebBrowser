@@ -1,0 +1,29 @@
+<svg width="880" height="240" viewBox="0 0 880 240" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="uwebbrowser · render the web in-engine">
+  <!-- README banner. Built from the brand tokens in UWebBrowser-Brand-Guidelines.pdf.
+       Surface: Ink/950. Type: Ink/100 & Ink/400. Signal (#F24C3A) appears once,
+       on the globe's live marker node — honoring the 5% accent ceiling. -->
+  <defs>
+    <style>
+      .wordmark { font-family: 'Geist Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; }
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="880" height="240" rx="28" fill="#0A0A0B"/>
+  <rect x="0.5" y="0.5" width="879" height="239" rx="27.5" fill="none" stroke="#1F1F23"/>
+
+  <!-- The mark: globe + live marker. Geometry from the guidelines; never redrawn by hand. -->
+  <g transform="translate(96 82) scale(3.05)">
+    <circle cx="12" cy="12" r="10" stroke="#F2F1F4" stroke-width="2.9"/>
+    <ellipse cx="12" cy="12" rx="4.05" ry="10" stroke="#F2F1F4" stroke-width="2.9"/>
+    <path d="M2 12h20" stroke="#F2F1F4" stroke-width="2.9" stroke-linecap="round"/>
+    <circle cx="19.7" cy="4.3" r="3.65" fill="#F24C3A"/>
+  </g>
+
+  <!-- Wordmark, lowercase, tight tracking -->
+  <text x="196" y="126" class="wordmark" font-size="58" font-weight="600" letter-spacing="-2" fill="#F2F1F4">uwebbrowser</text>
+
+  <!-- Taglines from the type scale -->
+  <text x="198" y="166" class="wordmark" font-size="21" font-weight="400" fill="#9897A1">Render the web in-engine.</text>
+  <text x="198" y="200" class="mono" font-size="12.5" font-weight="500" letter-spacing="1.8" fill="#6E6E77">WEB BROWSER FOR UNREAL ENGINE DEVELOPERS</text>
+</svg>
