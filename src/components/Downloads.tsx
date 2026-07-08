@@ -28,8 +28,11 @@ import { cn } from "../lib/utils";
  */
 export function Downloads({
   onPanelOpenChange,
+  openSignal = 0,
 }: {
   onPanelOpenChange: (open: boolean) => void;
+  /** Bumped by the app to toggle the panel from the Ctrl+J shortcut. */
+  openSignal?: number;
 }) {
   const [items, setItems] = useState<DownloadRec[]>(loadDownloads);
   const [open, setOpen] = useState(false);
@@ -64,6 +67,11 @@ export function Downloads({
   }, [items]);
 
   useEffect(() => onPanelOpenChange(open), [open, onPanelOpenChange]);
+
+  // Ctrl+J toggles the panel (the app bumps openSignal).
+  useEffect(() => {
+    if (openSignal > 0) setOpen((o) => !o);
+  }, [openSignal]);
 
   // Close on Escape while open.
   useEffect(() => {

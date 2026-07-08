@@ -18,6 +18,13 @@ use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Pick a loopback port for Chromium remote debugging — what lets us embed
+    // the real DevTools frontend in a docked panel. The flag is applied per
+    // browsing-profile webview via `browsing_browser_args` (wry sets browser
+    // args through the API, which overrides the WEBVIEW2_* env var). 0 off
+    // Windows; the DevTools commands read it back to build the frontend URL.
+    let devtools_port = webext::pick_debug_port();
+
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
     #[cfg(desktop)]
@@ -36,6 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(tabs::TabsState::default())
+        .manage(tabs::DevtoolsPort(devtools_port))
         .manage(default_browser::StartupUrls::from_env())
         .manage(unreal::BuildState::default())
         .manage(sysmon::MonitorState::default())
@@ -49,9 +57,18 @@ pub fn run() {
             tabs::tab_find,
             tabs::tab_zoom,
             tabs::tab_devtools,
+            tabs::devtools_open,
+            tabs::devtools_close,
+            tabs::devtools_set_dock,
+            tabs::devtools_set_size,
+            tabs::tab_print,
+            tabs::permission_respond,
+            tabs::basic_auth_respond,
+            tabs::cert_respond,
             tabs::tab_live_url,
             tabs::set_content_insets,
             tabs::clear_browsing_data,
+            tabs::open_external,
             downloads::download_cancel,
             downloads::download_open,
             downloads::download_show,

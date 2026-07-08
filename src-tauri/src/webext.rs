@@ -76,7 +76,9 @@ pub fn resume(_webview: &Webview) {}
 
 /// Open the native Chromium DevTools window for a tab webview — the real
 /// Elements/Console/Network/Sources inspector, same as Chrome. Opens as its own
-/// OS window (WebView2 has no docked mode). No-op off Windows.
+/// OS window (WebView2 has no docked mode). Kept as an internal fallback; the UI
+/// drives the *docked* panel instead (see `enable_remote_debugging`). No-op off
+/// Windows.
 #[cfg(windows)]
 pub fn open_devtools(webview: &Webview) {
     let _ = webview.with_webview(|pw| unsafe { imp::open_devtools(&pw) });
@@ -84,6 +86,70 @@ pub fn open_devtools(webview: &Webview) {
 
 #[cfg(not(windows))]
 pub fn open_devtools(_webview: &Webview) {}
+
+/// Pick a free loopback port for Chromium's remote-debugging endpoint — the
+/// endpoint that serves the *real* DevTools frontend we embed in a docked panel
+/// (the only way WebView2 exposes it; there is no docked-mode API). Binds :0 to
+/// let the OS hand us a free port, then drops the listener so Chromium can claim
+/// it. Returns 0 off Windows / on failure. The port is handed to
+/// [`browsing_browser_args`], which is what actually enables debugging.
+#[cfg(windows)]
+pub fn pick_debug_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port())
+        .unwrap_or(0)
+}
+
+#[cfg(not(windows))]
+pub fn pick_debug_port() -> u16 {
+    0
+}
+
+/// WebView2 browser arguments for the shared **browsing** profile: wry's own
+/// defaults (which we must reproduce, since setting `additional_browser_args`
+/// *replaces* them) plus the remote-debugging flags that let us load the docked
+/// DevTools frontend. `--remote-allow-origins` is required since Chromium M111
+/// for the frontend's WebSocket handshake; we scope it to the frontend origin.
+///
+/// Every webview on the browsing profile (tabs, the extension host, the
+/// extension popup) MUST pass the *identical* string — WebView2 coalesces all
+/// webviews sharing a user-data folder into one browser process and rejects a
+/// later environment whose options don't match the running one. Returns None
+/// when debugging is off (port 0 / non-Windows), so callers leave wry's default
+/// in place. Note the env var `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` can't be
+/// used here: wry always sets the arguments via the API, which takes precedence.
+pub fn browsing_browser_args(port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    Some(format!(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+         --remote-debugging-port={port} --remote-allow-origins=http://127.0.0.1:{port}"
+    ))
+}
+
+/// Resolve the CDP *target id* of a tab webview's page — the id used to build
+/// its DevTools frontend URL (`.../devtools/page/<id>`). Asks the page over CDP
+/// (`Target.getTargetInfo`), which is exact even when several tabs share a URL.
+/// The COM completion callback fires later on the UI thread, so we bridge it
+/// back to this (worker-thread) caller through a channel with a short timeout.
+/// Returns None off Windows / on failure.
+#[cfg(windows)]
+pub fn resolve_target_id(webview: &Webview) -> Option<String> {
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel::<String>();
+    let _ = webview.with_webview(move |pw| unsafe { imp::resolve_target_id(&pw, tx) });
+    rx.recv_timeout(std::time::Duration::from_secs(3))
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+#[cfg(not(windows))]
+pub fn resolve_target_id(_webview: &Webview) -> Option<String> {
+    None
+}
 
 /// Cancel an in-progress download by its id. The WebView2 download operation has
 /// thread affinity to the UI thread where it was created, so the cancel is
@@ -96,6 +162,55 @@ pub fn cancel_download(app: &AppHandle, id: String) {
 #[cfg(not(windows))]
 pub fn cancel_download(_app: &AppHandle, _id: String) {}
 
+/// Open WebView2's built-in print preview for a tab (Ctrl+P), the browser one
+/// that matches Chrome. No-op off Windows.
+#[cfg(windows)]
+pub fn print(webview: &Webview) {
+    let _ = webview.with_webview(|pw| unsafe { imp::print(&pw) });
+}
+
+#[cfg(not(windows))]
+pub fn print(_webview: &Webview) {}
+
+/// Resolve a pending permission prompt. The COM args have UI-thread affinity,
+/// so the answer is marshaled onto the main thread (commands run on a worker).
+#[cfg(windows)]
+pub fn permission_respond(app: &AppHandle, id: String, allow: bool) {
+    let _ = app.run_on_main_thread(move || imp::permission_respond(&id, allow));
+}
+
+#[cfg(not(windows))]
+pub fn permission_respond(_app: &AppHandle, _id: String, _allow: bool) {}
+
+/// Resolve a pending HTTP basic-auth prompt with credentials, or cancel it.
+#[cfg(windows)]
+pub fn basic_auth_respond(
+    app: &AppHandle,
+    id: String,
+    username: Option<String>,
+    password: Option<String>,
+) {
+    let _ = app.run_on_main_thread(move || imp::basic_auth_respond(&id, username, password));
+}
+
+#[cfg(not(windows))]
+pub fn basic_auth_respond(
+    _app: &AppHandle,
+    _id: String,
+    _username: Option<String>,
+    _password: Option<String>,
+) {
+}
+
+/// Resolve a certificate-error interstitial (proceed anyway, or cancel).
+#[cfg(windows)]
+pub fn cert_respond(app: &AppHandle, id: String, proceed: bool) {
+    let _ = app.run_on_main_thread(move || imp::cert_respond(&id, proceed));
+}
+
+#[cfg(not(windows))]
+pub fn cert_respond(_app: &AppHandle, _id: String, _proceed: bool) {}
+
 #[cfg(windows)]
 mod imp {
     use super::*;
@@ -104,19 +219,33 @@ mod imp {
     use std::sync::atomic::{AtomicU64, Ordering};
     use tauri::webview::PlatformWebview;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2Controller, ICoreWebView2DownloadOperation, ICoreWebView2_15,
-        ICoreWebView2_3, ICoreWebView2_4,
+        ICoreWebView2, ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Controller,
+        ICoreWebView2Deferral, ICoreWebView2DownloadOperation,
+        ICoreWebView2PermissionRequestedEventArgs,
+        ICoreWebView2ServerCertificateErrorDetectedEventArgs, ICoreWebView2_10, ICoreWebView2_14,
+        ICoreWebView2_15, ICoreWebView2_16, ICoreWebView2_3, ICoreWebView2_4,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED, COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED,
         COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
-        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_PERMISSION_KIND,
+        COREWEBVIEW2_PERMISSION_KIND_CAMERA, COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ,
+        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
+        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        COREWEBVIEW2_PERMISSION_STATE_DEFAULT, COREWEBVIEW2_PERMISSION_STATE_DENY,
+        COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER,
+        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW,
+        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL, COREWEBVIEW2_WEB_ERROR_STATUS,
+        COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED,
     };
     use webview2_com::{
-        AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler,
-        DownloadStartingEventHandler, FaviconChangedEventHandler, ProcessFailedEventHandler,
-        StateChangedEventHandler, TrySuspendCompletedHandler,
+        AcceleratorKeyPressedEventHandler, BasicAuthenticationRequestedEventHandler,
+        BytesReceivedChangedEventHandler, CallDevToolsProtocolMethodCompletedHandler,
+        DownloadStartingEventHandler, FaviconChangedEventHandler, HistoryChangedEventHandler,
+        NavigationCompletedEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
+        ServerCertificateErrorDetectedEventHandler, StateChangedEventHandler,
+        TrySuspendCompletedHandler,
     };
-    use windows::core::{Interface, PWSTR};
+    use windows::core::{Interface, HSTRING, PCWSTR, PWSTR};
     use windows::Win32::Foundation::RECT;
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -132,15 +261,82 @@ mod imp {
         /// download reaches a terminal state.
         static DOWNLOADS: RefCell<HashMap<String, ICoreWebView2DownloadOperation>> =
             RefCell::new(HashMap::new());
+
+        /// Pending permission prompts (camera/mic/geo/notifications/clipboard),
+        /// keyed by the id the chrome UI echoes back in `permission_respond`.
+        /// Value pairs the args (to set Allow/Deny) with the deferral (to
+        /// release the paused request). UI-thread only, like DOWNLOADS.
+        static PERMS: RefCell<
+            HashMap<String, (ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2Deferral)>,
+        > = RefCell::new(HashMap::new());
+
+        /// Pending HTTP basic-auth challenges, keyed like PERMS.
+        static AUTHS: RefCell<
+            HashMap<
+                String,
+                (ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Deferral),
+            >,
+        > = RefCell::new(HashMap::new());
+
+        /// Pending TLS certificate-error interstitials, keyed like PERMS.
+        static CERTS: RefCell<
+            HashMap<
+                String,
+                (ICoreWebView2ServerCertificateErrorDetectedEventArgs, ICoreWebView2Deferral),
+            >,
+        > = RefCell::new(HashMap::new());
     }
 
     /// Monotonic source of per-download ids (`dl1`, `dl2`, …). A counter, not a
     /// clock/random, so it's deterministic and needs no extra deps.
     static NEXT_DL_ID: AtomicU64 = AtomicU64::new(1);
+    /// Shared monotonic source for permission/auth/cert request ids.
+    static NEXT_REQ_ID: AtomicU64 = AtomicU64::new(1);
+
+    fn next_req_id(prefix: &str) -> String {
+        format!("{prefix}{}", NEXT_REQ_ID.fetch_add(1, Ordering::Relaxed))
+    }
 
     pub unsafe fn open_devtools(pw: &PlatformWebview) {
         if let Ok(core) = pw.controller().CoreWebView2() {
             let _ = core.OpenDevToolsWindow();
+        }
+    }
+
+    /// Send `Target.getTargetInfo` to the page and forward the resulting
+    /// `targetId` through `tx`. The completion handler fires asynchronously on
+    /// the UI thread; if the call can't even be issued we send an empty string
+    /// so the waiting caller doesn't block for the full timeout.
+    pub unsafe fn resolve_target_id(pw: &PlatformWebview, tx: std::sync::mpsc::Sender<String>) {
+        let Ok(core) = pw.controller().CoreWebView2() else {
+            let _ = tx.send(String::new());
+            return;
+        };
+        let method = HSTRING::from("Target.getTargetInfo");
+        let params = HSTRING::from("{}");
+        let handler =
+            CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |hr, result| {
+                // The macro hands the PCWSTR result back already decoded to a
+                // String; it's the CDP reply JSON on success.
+                let json = if hr.is_ok() { result } else { String::new() };
+                let id = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("targetInfo")?
+                            .get("targetId")?
+                            .as_str()
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_default();
+                let _ = tx.send(id);
+                Ok(())
+            }));
+        if core
+            .CallDevToolsProtocolMethod(PCWSTR(method.as_ptr()), PCWSTR(params.as_ptr()), &handler)
+            .is_err()
+        {
+            // The handler won't fire; the Sender it owns drops here, so the
+            // caller's recv returns Err (disconnected) rather than hanging.
         }
     }
 
@@ -227,6 +423,248 @@ mod imp {
             install_process_failed(app, id, &core);
             install_favicon(app, id, &core);
             install_downloads(app, id, &core);
+            install_permissions(app, id, &core);
+            install_basic_auth(app, id, &core);
+            install_navigation_completed(app, id, &core);
+            install_history(app, id, &core);
+            install_cert_error(app, id, &core);
+        }
+    }
+
+    /// The web-platform permission kinds we surface a Chrome-style prompt for.
+    /// Kinds we don't recognise are left to WebView2's default handling.
+    fn perm_kind_str(kind: COREWEBVIEW2_PERMISSION_KIND) -> Option<&'static str> {
+        Some(match kind {
+            COREWEBVIEW2_PERMISSION_KIND_CAMERA => "camera",
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => "microphone",
+            COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION => "geolocation",
+            COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS => "notifications",
+            COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ => "clipboard",
+            _ => return None,
+        })
+    }
+
+    /// Prompt for camera/mic/geolocation/notifications/clipboard, the way Chrome
+    /// does, instead of WebView2's silent default-deny. The request is paused
+    /// with a deferral and stashed in PERMS; the chrome UI shows a prompt and
+    /// calls back `permission_respond`, which sets Allow/Deny and resumes it.
+    /// A decision WebView2 already persisted for this origin (State != Default)
+    /// is honoured silently — that's our "remember" behaviour, for free.
+    unsafe fn install_permissions(app: &AppHandle, id: &str, core: &ICoreWebView2) {
+        let app = app.clone();
+        let tab_id = id.to_string();
+        let handler = PermissionRequestedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND(0);
+            let _ = args.PermissionKind(&mut kind);
+            let Some(kind_str) = perm_kind_str(kind) else {
+                return Ok(()); // leave unknown kinds to the engine default
+            };
+            // Honour a remembered decision without re-prompting.
+            let mut state = COREWEBVIEW2_PERMISSION_STATE_DEFAULT;
+            let _ = args.State(&mut state);
+            if state != COREWEBVIEW2_PERMISSION_STATE_DEFAULT {
+                return Ok(());
+            }
+            let origin = read_pwstr(|p| args.Uri(p));
+            let Ok(deferral) = args.GetDeferral() else {
+                return Ok(());
+            };
+            let req_id = next_req_id("perm");
+            PERMS.with(|m| m.borrow_mut().insert(req_id.clone(), (args.clone(), deferral)));
+            let value = serde_json::json!({
+                "id": req_id, "kind": kind_str, "origin": origin,
+            })
+            .to_string();
+            crate::tabs::emit_tab_event(&app, &tab_id, "permission", value);
+            Ok(())
+        }));
+        let mut token = 0i64;
+        let _ = core.add_PermissionRequested(&handler, &mut token);
+    }
+
+    /// Answer a permission prompt. Runs on the UI thread (marshaled by the
+    /// command) since the args/deferral have thread affinity.
+    pub fn permission_respond(id: &str, allow: bool) {
+        PERMS.with(|m| {
+            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
+                unsafe {
+                    let state = if allow {
+                        COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                    } else {
+                        COREWEBVIEW2_PERMISSION_STATE_DENY
+                    };
+                    let _ = args.SetState(state);
+                    let _ = deferral.Complete();
+                }
+            }
+        });
+    }
+
+    /// Surface a Chrome-style username/password dialog for HTTP basic auth
+    /// (401 Basic), which WebView2 otherwise answers with nothing. Paused with a
+    /// deferral; the chrome UI collects credentials and calls `basic_auth_respond`.
+    unsafe fn install_basic_auth(app: &AppHandle, id: &str, core: &ICoreWebView2) {
+        let Ok(core10) = core.cast::<ICoreWebView2_10>() else {
+            return;
+        };
+        let app = app.clone();
+        let tab_id = id.to_string();
+        let handler =
+            BasicAuthenticationRequestedEventHandler::create(Box::new(move |_sender, args| {
+                let Some(args) = args else { return Ok(()) };
+                let uri = read_pwstr(|p| args.Uri(p));
+                let challenge = read_pwstr(|p| args.Challenge(p));
+                let Ok(deferral) = args.GetDeferral() else {
+                    return Ok(());
+                };
+                let req_id = next_req_id("auth");
+                AUTHS.with(|m| m.borrow_mut().insert(req_id.clone(), (args.clone(), deferral)));
+                let value = serde_json::json!({
+                    "id": req_id, "origin": uri, "challenge": challenge,
+                })
+                .to_string();
+                crate::tabs::emit_tab_event(&app, &tab_id, "basic-auth", value);
+                Ok(())
+            }));
+        let mut token = 0i64;
+        let _ = core10.add_BasicAuthenticationRequested(&handler, &mut token);
+    }
+
+    /// Answer a basic-auth prompt: supply credentials, or cancel if the user
+    /// dismissed it. UI thread only.
+    pub fn basic_auth_respond(id: &str, username: Option<String>, password: Option<String>) {
+        AUTHS.with(|m| {
+            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
+                unsafe {
+                    match (username, password) {
+                        (Some(u), Some(p)) => {
+                            if let Ok(resp) = args.Response() {
+                                let uw: Vec<u16> = u.encode_utf16().chain([0]).collect();
+                                let pw: Vec<u16> = p.encode_utf16().chain([0]).collect();
+                                let _ = resp.SetUserName(PWSTR(uw.as_ptr() as *mut u16));
+                                let _ = resp.SetPassword(PWSTR(pw.as_ptr() as *mut u16));
+                            }
+                        }
+                        _ => {
+                            let _ = args.SetCancel(true);
+                        }
+                    }
+                    let _ = deferral.Complete();
+                }
+            }
+        });
+    }
+
+    /// Report a failed main-frame navigation (DNS failure, connection refused,
+    /// TLS block, timeout…) so the chrome UI can draw a branded error page with
+    /// a Reload button, instead of leaving Chromium's raw interstitial showing.
+    unsafe fn install_navigation_completed(app: &AppHandle, id: &str, core: &ICoreWebView2) {
+        let app = app.clone();
+        let tab_id = id.to_string();
+        let core_for_source = core.clone();
+        let handler = NavigationCompletedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut ok = windows::core::BOOL(1);
+            let _ = args.IsSuccess(&mut ok);
+            if ok.as_bool() {
+                return Ok(());
+            }
+            let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
+            let _ = args.WebErrorStatus(&mut status);
+            // A navigation we deliberately cancelled (external-protocol handoff,
+            // stop button) isn't an error — don't draw an error page for it.
+            if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                return Ok(());
+            }
+            let url = read_pwstr(|p| core_for_source.Source(p));
+            // uwb:/about: internal targets never show a network error page.
+            if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("file:") {
+                return Ok(());
+            }
+            let value = serde_json::json!({ "url": url, "code": status.0 }).to_string();
+            crate::tabs::emit_tab_event(&app, &tab_id, "nav-error", value);
+            Ok(())
+        }));
+        let mut token = 0i64;
+        let _ = core.add_NavigationCompleted(&handler, &mut token);
+    }
+
+    /// Emit the tab's back/forward availability whenever session history
+    /// changes, so the toolbar can grey the arrows out like Chrome (our
+    /// buttons drive the engine's real history via eval, so JS can't track it).
+    unsafe fn install_history(app: &AppHandle, id: &str, core: &ICoreWebView2) {
+        let app = app.clone();
+        let tab_id = id.to_string();
+        let core_cb = core.clone();
+        let handler = HistoryChangedEventHandler::create(Box::new(move |_sender, _args| {
+            let mut back = windows::core::BOOL(0);
+            let mut fwd = windows::core::BOOL(0);
+            let _ = core_cb.CanGoBack(&mut back);
+            let _ = core_cb.CanGoForward(&mut fwd);
+            let value =
+                serde_json::json!({ "back": back.as_bool(), "forward": fwd.as_bool() }).to_string();
+            crate::tabs::emit_tab_event(&app, &tab_id, "nav-state", value);
+            Ok(())
+        }));
+        let mut token = 0i64;
+        let _ = core.add_HistoryChanged(&handler, &mut token);
+    }
+
+    /// Turn a TLS certificate error into a Chrome-style interstitial the user
+    /// can read and (for non-fatal errors) click through, rather than WebView2's
+    /// dead-end block. Paused with a deferral; `cert_respond` sets the action.
+    unsafe fn install_cert_error(app: &AppHandle, id: &str, core: &ICoreWebView2) {
+        let Ok(core14) = core.cast::<ICoreWebView2_14>() else {
+            return;
+        };
+        let app = app.clone();
+        let tab_id = id.to_string();
+        let handler =
+            ServerCertificateErrorDetectedEventHandler::create(Box::new(move |_sender, args| {
+                let Some(args) = args else { return Ok(()) };
+                let uri = read_pwstr(|p| args.RequestUri(p));
+                let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
+                let _ = args.ErrorStatus(&mut status);
+                let Ok(deferral) = args.GetDeferral() else {
+                    return Ok(());
+                };
+                let req_id = next_req_id("cert");
+                CERTS.with(|m| m.borrow_mut().insert(req_id.clone(), (args.clone(), deferral)));
+                let value =
+                    serde_json::json!({ "id": req_id, "url": uri, "code": status.0 }).to_string();
+                crate::tabs::emit_tab_event(&app, &tab_id, "cert-error", value);
+                Ok(())
+            }));
+        let mut token = 0i64;
+        let _ = core14.add_ServerCertificateErrorDetected(&handler, &mut token);
+    }
+
+    /// Resolve a certificate interstitial: proceed (allow this cert for the
+    /// session) or cancel the load. UI thread only.
+    pub fn cert_respond(id: &str, proceed: bool) {
+        CERTS.with(|m| {
+            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
+                unsafe {
+                    let action = if proceed {
+                        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW
+                    } else {
+                        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL
+                    };
+                    let _ = args.SetAction(action);
+                    let _ = deferral.Complete();
+                }
+            }
+        });
+    }
+
+    /// Open WebView2's built-in print preview (the browser one, matching
+    /// Chrome's Ctrl+P), on the tab's CoreWebView2.
+    pub unsafe fn print(pw: &PlatformWebview) {
+        if let Ok(core) = pw.controller().CoreWebView2() {
+            if let Ok(core16) = core.cast::<ICoreWebView2_16>() {
+                let _ = core16.ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER);
+            }
         }
     }
 
@@ -456,6 +894,10 @@ mod imp {
             0x52 => Some("reload"),                                     // R
             0x46 => Some("find"),                                       // F
             0x48 => Some("history"),                                    // H
+            0x50 => Some("print"),                                      // P
+            0x4A => Some("downloads"),                                  // J
+            0x44 => Some("pin"),                                        // D
+            0x2E | 0x08 if shift => Some("clear-data"),                 // Delete/Backspace
             0xBC => Some("settings"),                                   // VK_OEM_COMMA
             0xC0 => Some("terminal"),                                   // VK_OEM_3 (`)
             0x31 => Some("tab-1"),

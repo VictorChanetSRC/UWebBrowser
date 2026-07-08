@@ -13,7 +13,19 @@ export type TabEventPayload = {
    *  - "favicon": the page's real favicon URL.
    *  - "download": JSON `{ id, state: "start"|"progress"|"done"|"fail"|
    *    "cancel", name, path, url, received, total }` — `total` is -1 when the
-   *    server sent no content length. */
+   *    server sent no content length.
+   *  - "external-url": a deep link (mailto:, steam://, …) the page tried to
+   *    open; `value` is the URL. Confirm, then `openExternal`.
+   *  - "permission": JSON `{ id, kind: "camera"|"microphone"|"geolocation"|
+   *    "notifications"|"clipboard", origin }` — answer with `permissionRespond`.
+   *  - "basic-auth": JSON `{ id, origin, challenge }` — answer with
+   *    `basicAuthRespond` (omit creds to cancel).
+   *  - "cert-error": JSON `{ id, url, code }` — a TLS cert error; answer with
+   *    `certRespond`.
+   *  - "nav-error": JSON `{ url, code }` — a failed main-frame navigation
+   *    (DNS/refused/timeout); draw a branded error page.
+   *  - "nav-state": JSON `{ back, forward }` — session-history availability, to
+   *    grey the toolbar arrows. */
   kind:
     | "title"
     | "url"
@@ -23,7 +35,13 @@ export type TabEventPayload = {
     | "zoom"
     | "crashed"
     | "favicon"
-    | "download";
+    | "download"
+    | "external-url"
+    | "permission"
+    | "basic-auth"
+    | "cert-error"
+    | "nav-error"
+    | "nav-state";
   value: string;
 };
 
@@ -63,8 +81,28 @@ export const ipc = {
     invoke("tab_find", { id, query, forward, fromStart }),
   /** Set a tab's zoom factor (1.0 == 100%). */
   tabZoom: (id: string, factor: number) => invoke("tab_zoom", { id, factor }),
-  /** Open the native Chromium DevTools window for a tab. */
+  /** Open the native (floating) Chromium DevTools window — internal fallback. */
   tabDevtools: (id: string) => invoke("tab_devtools", { id }),
+  /** Open/re-target the *docked* DevTools panel over a tab (the real inspector). */
+  devtoolsOpen: (id: string) => invoke("devtools_open", { id }),
+  /** Hide the docked DevTools panel; the page reclaims the full area. */
+  devtoolsClose: () => invoke("devtools_close"),
+  /** Dock the panel to the "bottom" or "right" edge. */
+  devtoolsSetDock: (dock: "bottom" | "right") => invoke("devtools_set_dock", { dock }),
+  /** Resize the panel to a fraction (0.15–0.85) of the content area. */
+  devtoolsSetSize: (size: number) => invoke("devtools_set_size", { size }),
+  /** Open WebView2's built-in print preview for a tab (Ctrl+P). */
+  tabPrint: (id: string) => invoke("tab_print", { id }),
+  /** Hand a deep link (mailto:, steam://, …) to the OS after the user confirms. */
+  openExternal: (url: string) => invoke("open_external", { url }),
+  /** Answer a permission prompt (camera/mic/geo/notifications/clipboard). */
+  permissionRespond: (id: string, allow: boolean) =>
+    invoke("permission_respond", { id, allow }),
+  /** Answer an HTTP basic-auth prompt; omit creds to cancel the load. */
+  basicAuthRespond: (id: string, username: string | null, password: string | null) =>
+    invoke("basic_auth_respond", { id, username, password }),
+  /** Resolve a certificate-error interstitial: proceed anyway, or cancel. */
+  certRespond: (id: string, proceed: boolean) => invoke("cert_respond", { id, proceed }),
   /** The tab's live document URL — tracks History-API (SPA) navigations that
    *  fire no page-load event. */
   tabLiveUrl: (id: string) => invoke<string>("tab_live_url", { id }),

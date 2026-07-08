@@ -19,10 +19,21 @@ import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
 import { FindBar } from "./components/FindBar";
+import { DevtoolsDock } from "./components/DevtoolsDock";
 import { Button } from "./components/ui/button";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
+import {
+  BasicAuthDialog,
+  CertInterstitial,
+  ExternalLinkConfirm,
+  NavErrorPage,
+  PermissionPrompt,
+  type AuthReq,
+  type CertReq,
+  type PermissionReq,
+} from "./components/BrowserPrompts";
 import { GITHUB_REPO_URL } from "./lib/github";
 // Lazy so xterm (one of the heaviest deps) and the terminal module split into
 // their own chunk, loaded only when a terminal tab is actually opened — not in
@@ -36,6 +47,7 @@ import { loadSession, saveSession } from "./lib/session";
 import type { LinkItem } from "./lib/engines";
 import { recordVisit, updateTitle } from "./lib/history";
 import { hostOf, tabLabelFor, isNavigableUrl } from "./lib/url";
+import { zoomFor, setZoomFor } from "./lib/zoom";
 import {
   engineFor,
   loadSettings,
@@ -63,6 +75,12 @@ export type Tab = {
   /** The page's real favicon URL, reported natively (privacy: avoids the
    *  third-party favicon service). Undefined falls back to that service. */
   favicon?: string;
+  /** Session-history availability, from the engine, to grey the nav arrows. */
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  /** Set when a main-frame navigation failed (DNS/refused/timeout); shows a
+   *  branded error page. Cleared when a fresh load starts. */
+  navError?: { code: number; url: string };
 };
 
 export const HOME_URL = "uwb://home";
@@ -173,10 +191,33 @@ export default function App() {
     () => localStorage.getItem("uwb.extBar") === "1",
   );
   const [findOpen, setFindOpen] = useState(false);
+  // Docked DevTools: which tab the panel is inspecting (null = closed), which
+  // edge it's docked to, and how much of the content area it takes. The panel
+  // body is a native webview the backend lays out; only the resize/controls
+  // strip lives in the chrome. `devtoolsResizing` mirrors the sidebar pattern —
+  // the page webview is hidden while the splitter is dragged.
+  const [devtoolsTabId, setDevtoolsTabId] = useState<string | null>(null);
+  const [devtoolsDock, setDevtoolsDock] = useState<"bottom" | "right">(() =>
+    localStorage.getItem("uwb.devtoolsDock") === "right" ? "right" : "bottom",
+  );
+  const [devtoolsSize, setDevtoolsSize] = useState(() => {
+    const s = Number(localStorage.getItem("uwb.devtoolsSize"));
+    return Number.isFinite(s) && s >= 0.15 && s <= 0.85 ? s : 0.35;
+  });
+  const [devtoolsResizing, setDevtoolsResizing] = useState(false);
   // The downloads panel drops into the content area; while it's open the active
   // page's webview is hidden so the dropdown isn't painted over (same as the
   // omnibox). Downloads state itself lives inside the self-contained component.
   const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
+  // Bumped by Ctrl+J to toggle the downloads panel (which owns its open state).
+  const [downloadsOpenSignal, setDownloadsOpenSignal] = useState(0);
+  // Web-platform prompts raised natively for a tab (permission / basic-auth /
+  // cert / deep-link). Each holds the originating tab id so it's shown only
+  // while that tab is active, like Chrome.
+  const [permissionReq, setPermissionReq] = useState<PermissionReq | null>(null);
+  const [authReq, setAuthReq] = useState<AuthReq | null>(null);
+  const [certReq, setCertReq] = useState<CertReq | null>(null);
+  const [externalUrl, setExternalUrl] = useState<string | null>(null);
   const closedUrls = useRef<string[]>([]);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
@@ -246,6 +287,8 @@ export default function App() {
   activeIdRef.current = activeId;
   const openExtIdRef = useRef(openExtId);
   openExtIdRef.current = openExtId;
+  const devtoolsTabIdRef = useRef(devtoolsTabId);
+  devtoolsTabIdRef.current = devtoolsTabId;
   // Web-tab ids whose native webview actually exists. Restored tabs are created
   // lazily on first activation (Chrome-style deferred restore), so this starts
   // empty and fills as tabs are opened or first shown.
@@ -263,6 +306,19 @@ export default function App() {
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
 
+  // A native tab webview paints over every chrome overlay, so it must be hidden
+  // whenever a full-bleed panel or modal for the active tab is showing (error
+  // page, cert interstitial, or a permission / basic-auth / deep-link prompt).
+  const certActive = certReq?.tabId === activeTab.id;
+  const authActive = authReq?.tabId === activeTab.id;
+  const permActive = permissionReq?.tabId === activeTab.id;
+  const webviewBlocked =
+    activeTab.navError != null ||
+    certActive ||
+    authActive ||
+    permActive ||
+    externalUrl != null;
+
   // The pinned extensions strip is a third chrome row; the content area (and
   // every tab webview) starts below it when shown.
   const showExtBar = extBarOpen;
@@ -272,6 +328,19 @@ export default function App() {
   const findActive = findOpen && activeTab.kind === "web" && !activeTab.crashed;
   const topInset =
     TOP_INSET + (showExtBar ? EXT_BAR_HEIGHT : 0) + (findActive ? FIND_BAR_HEIGHT : 0);
+
+  // The DevTools strip shows only when its bound tab is the one on screen and
+  // the page webview is actually visible. It stays up during our own splitter
+  // drag (the page is hidden then, like the sidebar resize) but not while an
+  // omnibox/downloads overlay, a modal, or the sidebar resize has hidden the
+  // page — the native panel is hidden in all those cases too.
+  const devtoolsVisible =
+    devtoolsTabId != null &&
+    devtoolsTabId === activeTab.id &&
+    activeTab.kind === "web" &&
+    !activeTab.crashed &&
+    (devtoolsResizing ||
+      !(omniboxOpen || downloadsPanelOpen || webviewBlocked || sidebarResizing));
 
   // Tell the native side where the content area starts. Pushes are skipped
   // mid-drag (the webview is hidden then); the final width lands here once the
@@ -367,6 +436,11 @@ export default function App() {
         return;
       }
       if (kind === "zoom") {
+        // Remember this host's zoom so it's restored on the next visit, like
+        // Chrome's per-site zoom.
+        const pct = Number(value);
+        const tab = tabsRef.current.find((t) => t.id === id);
+        if (pct && tab) setZoomFor(hostOf(tab.url), pct / 100);
         setToast(`Zoom ${value}%`);
         return;
       }
@@ -379,6 +453,45 @@ export default function App() {
       if (kind === "download") {
         // Handled entirely by the self-contained <Downloads> component, which
         // keeps its own listener; nothing to do here.
+        return;
+      }
+      if (kind === "external-url") {
+        // The page tried to follow a deep link (mailto:, steam://, …); confirm
+        // before handing it to the OS, like Chrome's external-protocol prompt.
+        setExternalUrl(value);
+        return;
+      }
+      if (kind === "permission") {
+        const p = JSON.parse(value) as { id: string; kind: string; origin: string };
+        setPermissionReq({ ...p, tabId: id });
+        return;
+      }
+      if (kind === "basic-auth") {
+        const a = JSON.parse(value) as { id: string; origin: string };
+        setAuthReq({ id: a.id, origin: a.origin, tabId: id });
+        return;
+      }
+      if (kind === "cert-error") {
+        const c = JSON.parse(value) as { id: string; url: string; code: number };
+        setCertReq({ id: c.id, url: c.url, code: c.code, tabId: id });
+        return;
+      }
+      if (kind === "nav-error") {
+        const e = JSON.parse(value) as { url: string; code: number };
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === id ? { ...tab, navError: e, loading: false } : tab,
+          ),
+        );
+        return;
+      }
+      if (kind === "nav-state") {
+        const s = JSON.parse(value) as { back: boolean; forward: boolean };
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === id ? { ...tab, canGoBack: s.back, canGoForward: s.forward } : tab,
+          ),
+        );
         return;
       }
       if (kind === "crashed") {
@@ -407,9 +520,9 @@ export default function App() {
           if (kind === "title") return { ...tab, title: value };
           if (kind === "loading") {
             const loading = value === "true";
-            // A fresh load clears a prior crash and any stale favicon.
+            // A fresh load clears a prior crash, error page and stale favicon.
             return loading
-              ? { ...tab, loading, crashed: false, favicon: undefined }
+              ? { ...tab, loading, crashed: false, navError: undefined, favicon: undefined }
               : { ...tab, loading };
           }
           const title =
@@ -484,14 +597,48 @@ export default function App() {
   useEffect(() => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
     if (tab?.kind !== "web") return;
-    ipc.activateTab(omniboxOpen || downloadsPanelOpen ? null : tab.id).catch(() => {});
-  }, [omniboxOpen, downloadsPanelOpen]);
+    const hide = omniboxOpen || downloadsPanelOpen || webviewBlocked;
+    ipc.activateTab(hide ? null : tab.id).catch(() => {});
+  }, [omniboxOpen, downloadsPanelOpen, webviewBlocked]);
 
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2400);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  // Persist DevTools dock side and size so the panel restores where you left it.
+  useEffect(() => {
+    localStorage.setItem("uwb.devtoolsDock", devtoolsDock);
+  }, [devtoolsDock]);
+  useEffect(() => {
+    localStorage.setItem("uwb.devtoolsSize", String(devtoolsSize));
+  }, [devtoolsSize]);
+
+  // Toggle the docked DevTools panel for the active web tab: close it if it's
+  // already inspecting this tab, otherwise open/re-target it here. Bound to the
+  // toolbar button, F12 and Ctrl+Shift+I (via runAction, so the native
+  // accelerator path and the DOM keydown path behave identically).
+  const toggleDevtools = useCallback(() => {
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (tab?.kind !== "web") return;
+    if (devtoolsTabIdRef.current === tab.id) {
+      setDevtoolsTabId(null);
+      ipc.devtoolsClose().catch(() => {});
+    } else {
+      setDevtoolsTabId(tab.id);
+      ipc.devtoolsOpen(tab.id).catch(() => {});
+    }
+  }, []);
+
+  // Restore the active tab's per-site zoom when its host changes, like Chrome.
+  // Keyed on host (not full URL) so in-site navigation doesn't re-apply on every
+  // path change; the native Ctrl+/- path persists via the "zoom" event above.
+  const activeHost = activeTab.kind === "web" ? hostOf(activeTab.url) : "";
+  useEffect(() => {
+    if (!activeHost) return;
+    ipc.tabZoom(activeIdRef.current, zoomFor(activeHost)).catch(() => {});
+  }, [activeHost]);
 
   // Load installed extensions once. Auto-open the bar the first time any exist
   // (until the user makes their own choice, tracked in localStorage).
@@ -665,6 +812,9 @@ export default function App() {
       // Only a materialized tab has a webview to close.
       if (materialized.current.has(id)) ipc.closeTab(id).catch(() => {});
       materialized.current.delete(id);
+      // The backend unbinds DevTools from a closed tab on its side; keep the
+      // chrome state in step so the strip doesn't linger.
+      if (devtoolsTabIdRef.current === id) setDevtoolsTabId(null);
     }
 
     const remaining = current.filter((t) => t.id !== id);
@@ -737,7 +887,7 @@ export default function App() {
   const onForward = useCallback(() => withWebTab((id) => ipc.goForward(id)), [withWebTab]);
   const onReload = useCallback(() => withWebTab((id) => ipc.reload(id)), [withWebTab]);
   const onStop = useCallback(() => withWebTab((id) => ipc.stop(id)), [withWebTab]);
-  const onDevtools = useCallback(() => withWebTab((id) => ipc.tabDevtools(id)), [withWebTab]);
+  const onDevtools = toggleDevtools;
   const onDownloadsPanelOpen = useCallback((open: boolean) => setDownloadsPanelOpen(open), []);
   const onTogglePin = useCallback(() => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
@@ -786,7 +936,20 @@ export default function App() {
           withWebTab((id) => ipc.reload(id));
           break;
         case "devtools":
-          withWebTab((id) => ipc.tabDevtools(id));
+          toggleDevtools();
+          break;
+        case "print":
+          withWebTab((id) => ipc.tabPrint(id));
+          break;
+        case "downloads":
+          setDownloadsOpenSignal((n) => n + 1);
+          break;
+        case "pin":
+          onTogglePin();
+          break;
+        case "clear-data":
+          // Chrome opens a dedicated clear-data dialog; ours lives in Settings.
+          goInternal(SETTINGS_URL);
           break;
         case "back":
           withWebTab((id) => ipc.goBack(id));
@@ -817,7 +980,7 @@ export default function App() {
           }
       }
     },
-    [openNewTab, closeTab, withWebTab, cycleTabs, goInternal, activate],
+    [openNewTab, closeTab, withWebTab, cycleTabs, goInternal, activate, onTogglePin, toggleDevtools],
   );
   // Ref so the tab-event listener can call the latest runAction without
   // re-subscribing on every identity change.
@@ -842,6 +1005,8 @@ export default function App() {
       if (e.shiftKey && e.key.toLowerCase() === "i") return "devtools";
       if (e.key === "Tab") return e.shiftKey ? "prev-tab" : "next-tab";
       if (e.key >= "1" && e.key <= "9") return `tab-${e.key}`;
+      // Ctrl+Shift+Delete — clear browsing data (opens Settings).
+      if (e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) return "clear-data";
       const key = e.key.toLowerCase();
       if (key === "t") return e.shiftKey ? "reopen-tab" : "new-tab";
       if (key === "w") return "close-tab";
@@ -849,6 +1014,9 @@ export default function App() {
       if (key === "r") return "reload";
       if (key === "f") return "find";
       if (key === "h") return "history";
+      if (key === "p") return "print";
+      if (key === "j") return "downloads";
+      if (key === "d") return "pin";
       if (key === ",") return "settings";
       if (e.key === "`") return "terminal";
       return null;
@@ -930,7 +1098,9 @@ export default function App() {
         onTogglePin={onTogglePin}
         onSuggestionsOpen={setOmniboxOpen}
         onDevtools={onDevtools}
+        devtoolsActive={devtoolsVisible}
         onDownloadsPanelOpen={onDownloadsPanelOpen}
+        downloadsOpenSignal={downloadsOpenSignal}
         onGithub={goGithub}
         onDiscord={goDiscord}
         onInstallExtension={installExtensionFromStore}
@@ -1059,11 +1229,108 @@ export default function App() {
             </div>
           )}
 
+          {/* Branded network-error page for a failed main-frame navigation. */}
+          {activeTab.kind === "web" && activeTab.navError && (
+            <NavErrorPage
+              code={activeTab.navError.code}
+              url={activeTab.navError.url}
+              onReload={() =>
+                activeTab.navError &&
+                ipc.navigateTab(activeTab.id, activeTab.navError.url).catch(() => {})
+              }
+            />
+          )}
+
+          {/* TLS certificate-error interstitial (proceed / back to safety). */}
+          {certActive && certReq && (
+            <CertInterstitial
+              req={certReq}
+              onProceed={(id) => {
+                ipc.certRespond(id, true).catch(() => {});
+                setCertReq(null);
+              }}
+              onCancel={(id) => {
+                ipc.certRespond(id, false).catch(() => {});
+                setCertReq(null);
+              }}
+            />
+          )}
+
+          {/* HTTP basic-auth credentials dialog. */}
+          {authActive && authReq && (
+            <BasicAuthDialog
+              req={authReq}
+              onSubmit={(id, u, p) => {
+                ipc.basicAuthRespond(id, u, p).catch(() => {});
+                setAuthReq(null);
+              }}
+              onCancel={(id) => {
+                ipc.basicAuthRespond(id, null, null).catch(() => {});
+                setAuthReq(null);
+              }}
+            />
+          )}
+
+          {/* Permission bubble (camera/mic/geolocation/notifications/clipboard). */}
+          {permActive && permissionReq && (
+            <PermissionPrompt
+              req={permissionReq}
+              onRespond={(id, allow) => {
+                ipc.permissionRespond(id, allow).catch(() => {});
+                setPermissionReq(null);
+              }}
+            />
+          )}
+
+          {/* Deep-link confirmation before handing a URL to another app. */}
+          {externalUrl && (
+            <ExternalLinkConfirm
+              url={externalUrl}
+              onOpen={() => {
+                ipc.openExternal(externalUrl).catch(() => {});
+                setExternalUrl(null);
+              }}
+              onCancel={() => setExternalUrl(null)}
+            />
+          )}
+
           {/* Find-in-page, in the strip reserved by `findActive` above. */}
           {findActive && (
             <div className="absolute right-4 top-1 z-40">
               <FindBar tabId={activeTab.id} onClose={() => setFindOpen(false)} />
             </div>
+          )}
+
+          {/* Docked DevTools control strip (the inspector itself is the native
+              panel webview the backend lays out beside/below it). */}
+          {devtoolsVisible && (
+            <DevtoolsDock
+              dock={devtoolsDock}
+              size={devtoolsSize}
+              topOffset={findActive ? FIND_BAR_HEIGHT : 0}
+              onResizeStart={() => {
+                setDevtoolsResizing(true);
+                // Hide the page while dragging, like the sidebar resize.
+                ipc.activateTab(null).catch(() => {});
+              }}
+              onResize={setDevtoolsSize}
+              onResizeEnd={(f) => {
+                setDevtoolsSize(f);
+                setDevtoolsResizing(false);
+                // Commit the size, then re-show the page at the new split.
+                ipc
+                  .devtoolsSetSize(f)
+                  .catch(() => {})
+                  .then(() => ipc.activateTab(activeTab.id))
+                  .catch(() => {});
+              }}
+              onToggleDock={() => {
+                const next = devtoolsDock === "bottom" ? "right" : "bottom";
+                setDevtoolsDock(next);
+                ipc.devtoolsSetDock(next).catch(() => {});
+              }}
+              onClose={toggleDevtools}
+            />
           )}
 
           {/* Terminal tabs stay mounted while hidden so their shell keeps

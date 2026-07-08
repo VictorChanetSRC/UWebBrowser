@@ -55,11 +55,14 @@ type Props = {
   onSettings: () => void;
   onTogglePin: () => void;
   onSuggestionsOpen: (open: boolean) => void;
-  /** Open the native DevTools for the active web tab. */
+  /** Toggle the docked DevTools panel for the active web tab. */
   onDevtools: () => void;
+  /** Whether the docked DevTools panel is currently open for the active tab. */
+  devtoolsActive: boolean;
   /** The downloads panel opened/closed; the app hides the page webview while
    *  it's open so the dropdown isn't painted over. */
   onDownloadsPanelOpen: (open: boolean) => void;
+  downloadsOpenSignal: number;
   /** Opens the UWebBrowser repo — the toolbar's standing ask for a star. */
   onGithub: () => void;
   /** Opens the community Discord invite in a new tab. */
@@ -84,6 +87,7 @@ function ToolbarImpl(props: Props) {
   const [highlight, setHighlight] = useState(0);
   const [copied, setCopied] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [pageInfo, setPageInfo] = useState(false);
   const storeId = tab.kind === "web" ? storeExtensionId(tab.url) : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
@@ -96,7 +100,13 @@ function ToolbarImpl(props: Props) {
   useEffect(() => {
     setDraft(null);
     setEditing(false);
+    setPageInfo(false);
   }, [tab.id]);
+
+  // The page-info bubble makes no sense while typing a new address.
+  useEffect(() => {
+    if (editing) setPageInfo(false);
+  }, [editing]);
 
   useEffect(() => {
     if (focusSignal > 0) setEditing(true);
@@ -180,10 +190,18 @@ function ToolbarImpl(props: Props) {
       </IconButton>
 
       <div className="flex gap-0.5">
-        <IconButton label="Back · Alt+←" onClick={props.onBack} disabled={tab.kind === "home"}>
+        <IconButton
+          label="Back · Alt+←"
+          onClick={props.onBack}
+          disabled={tab.kind === "home" || tab.canGoBack === false}
+        >
           <ArrowLeft aria-hidden />
         </IconButton>
-        <IconButton label="Forward · Alt+→" onClick={props.onForward} disabled={tab.kind === "home"}>
+        <IconButton
+          label="Forward · Alt+→"
+          onClick={props.onForward}
+          disabled={tab.kind === "home" || tab.canGoForward === false}
+        >
           <ArrowRight aria-hidden />
         </IconButton>
         {tab.loading && tab.kind === "web" ? (
@@ -222,21 +240,70 @@ function ToolbarImpl(props: Props) {
           submit();
         }}
       >
-        <span className="flex flex-none items-center gap-1.5 text-ink-500" aria-hidden>
-          {editing || tab.kind === "home" ? (
+        {tab.kind === "web" && !editing && (secure || insecure) ? (
+          <div className="relative flex-none">
+            <button
+              type="button"
+              onClick={() => setPageInfo((v) => !v)}
+              aria-label="Connection info"
+              aria-expanded={pageInfo}
+              className="flex items-center gap-1.5 rounded text-ink-500 transition-colors hover:text-ink-300"
+            >
+              {secure ? (
+                <Lock className="size-3" strokeWidth={1.8} />
+              ) : (
+                <>
+                  <LockOpen className="size-3" strokeWidth={1.8} />
+                  <span className="text-[11px] text-ink-400">Not secure</span>
+                  <span className="h-3.5 w-px bg-ink-800" />
+                </>
+              )}
+            </button>
+            {pageInfo && (
+              <>
+                {/* Click-away backdrop. */}
+                <button
+                  type="button"
+                  aria-hidden
+                  tabIndex={-1}
+                  className="fixed inset-0 z-40 cursor-default"
+                  onClick={() => setPageInfo(false)}
+                />
+                <div className="absolute left-0 top-7 z-50 w-72 animate-rise rounded-xl border border-ink-800 bg-ink-900 p-3.5 shadow-modal">
+                  <div className="flex items-center gap-2">
+                    {secure ? (
+                      <Lock className="size-4 text-ink-300" strokeWidth={1.8} aria-hidden />
+                    ) : (
+                      <LockOpen className="size-4 text-signal-400" strokeWidth={1.8} aria-hidden />
+                    )}
+                    <span className="text-[13px] text-ink-100">
+                      {secure ? "Connection is secure" : "Not secure"}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 text-[11.5px] leading-snug text-ink-500">
+                    {secure
+                      ? `Your connection to ${parsed?.hostname ?? "this site"} is encrypted with TLS.`
+                      : `This site uses HTTP. Data sent to ${parsed?.hostname ?? "it"} isn’t encrypted and could be read or changed.`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPageInfo(false);
+                      props.onSettings();
+                    }}
+                    className="mt-3 w-full rounded-lg border border-ink-800 px-2.5 py-1.5 text-left text-[12px] text-ink-200 transition-colors hover:bg-ink-800"
+                  >
+                    Site & privacy settings
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <span className="flex flex-none items-center gap-1.5 text-ink-500" aria-hidden>
             <Search className="size-3" strokeWidth={1.8} />
-          ) : secure ? (
-            <Lock className="size-3" strokeWidth={1.8} />
-          ) : insecure ? (
-            <>
-              <LockOpen className="size-3" strokeWidth={1.8} />
-              <span className="text-[11px] text-ink-400">Not secure</span>
-              <span className="h-3.5 w-px bg-ink-800" />
-            </>
-          ) : (
-            <Search className="size-3" strokeWidth={1.8} />
-          )}
-        </span>
+          </span>
+        )}
 
         {showInput ? (
           <input
@@ -398,7 +465,10 @@ function ToolbarImpl(props: Props) {
         </Button>
       )}
 
-      <Downloads onPanelOpenChange={props.onDownloadsPanelOpen} />
+      <Downloads
+        onPanelOpenChange={props.onDownloadsPanelOpen}
+        openSignal={props.downloadsOpenSignal}
+      />
 
       <GithubStars onClick={props.onGithub} />
 
@@ -408,6 +478,7 @@ function ToolbarImpl(props: Props) {
         label="Developer tools · F12"
         onClick={props.onDevtools}
         disabled={tab.kind !== "web"}
+        aria-pressed={props.devtoolsActive}
       >
         <Code2 aria-hidden />
       </IconButton>

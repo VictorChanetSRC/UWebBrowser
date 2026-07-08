@@ -679,7 +679,6 @@ pub async fn ext_open_popup(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    use tauri::webview::NewWindowResponse;
     use tauri::{LogicalPosition, LogicalSize, Url, WebviewUrl};
 
     // Guard against a bad runtime id: an empty/short id yields
@@ -727,12 +726,13 @@ pub async fn ext_open_popup(
             .disable_drag_drop_handler()
             // The popup's "sign in" buttons open the auth page via
             // window.open/chrome.tabs.create; without a handler WebView2 drops
-            // the request (why sign-in did nothing). Route it to a real tab —
-            // switching tabs dismisses this popup, and the shared profile means
-            // the login it completes unlocks the extension here.
-            .on_new_window(move |url, _features| {
-                crate::tabs::open_in_new_tab(&app_new, EXT_POPUP_LABEL, &url);
-                NewWindowResponse::Deny
+            // the request (why sign-in did nothing). Route it the same way tab
+            // pages route new windows: a sized popup (OAuth) opens as a real
+            // window, a plain link opens as a tab, a deep link goes to the OS.
+            // Switching tabs dismisses this popup, and the shared profile means
+            // a login it completes unlocks the extension here.
+            .on_new_window(move |url, features| {
+                crate::tabs::route_new_window(&app_new, EXT_POPUP_LABEL, &url, &features)
             });
     // Share the tab profile so the popup and the content scripts see the same
     // extension background/storage (this is what lets a login in the popup
@@ -742,6 +742,13 @@ pub async fn ext_open_popup(
     }
     if let Some(dir) = extensions_dir(&app) {
         builder = builder.extensions_path(dir);
+    }
+    // Same shared browsing profile as the tabs/host → must pass the identical
+    // remote-debugging args, or WebView2 rejects this webview's environment.
+    if let Some(args) =
+        crate::webext::browsing_browser_args(app.state::<crate::tabs::DevtoolsPort>().0)
+    {
+        builder = builder.additional_browser_args(&args);
     }
 
     let popup_view = window
@@ -844,6 +851,15 @@ pub fn spawn_host(app: &AppHandle) {
     }
     if let Some(dir) = extensions_dir(app) {
         builder = builder.extensions_path(dir);
+    }
+    // This is the first browsing-profile webview at launch, so it defines the
+    // browser process's arguments. It must carry the same remote-debugging flags
+    // as the tab webviews (identical string) or WebView2 rejects a later tab
+    // that asks for a mismatched environment on the shared profile.
+    if let Some(args) =
+        crate::webext::browsing_browser_args(app.state::<crate::tabs::DevtoolsPort>().0)
+    {
+        builder = builder.additional_browser_args(&args);
     }
     // Parked offscreen at 1×1; hidden right after so it never paints.
     match window.add_child(

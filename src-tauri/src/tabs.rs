@@ -8,6 +8,50 @@ use tauri::{
 
 pub const CHROME_LABEL: &str = "chrome";
 pub const TAB_PREFIX: &str = "tab-";
+/// The single, reused docked-DevTools panel webview. Not tab-prefixed, so the
+/// tab layout/visibility loops skip it — its geometry and show/hide are driven
+/// separately by `apply_bounds_to_all`.
+pub const DEVTOOLS_LABEL: &str = "devtools-panel";
+
+/// Thickness (px) of the chrome-drawn control strip carved off the panel's
+/// page-facing edge — the drag/resize handle that also holds the dock-toggle
+/// and close buttons. The native inspector webview sits just past it. The
+/// frontend draws the strip into exactly this reserved band, so keep the two in
+/// step (mirrored as `DEVTOOLS_STRIP` in App.tsx).
+const DEVTOOLS_STRIP: f64 = 30.0;
+/// Smallest slice (px) either the page or the panel may shrink to while docked.
+const DEVTOOLS_MIN: f64 = 120.0;
+
+/// Which edge the docked DevTools panel sits on.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Dock {
+    Bottom,
+    Right,
+}
+
+/// State of the docked DevTools panel. `tab_id == None` means closed.
+#[derive(Clone)]
+pub struct Devtools {
+    pub tab_id: Option<String>,
+    pub dock: Dock,
+    /// Fraction of the content area the panel occupies (clamped 0.15..0.85).
+    pub size: f64,
+}
+
+impl Default for Devtools {
+    fn default() -> Self {
+        Self {
+            tab_id: None,
+            dock: Dock::Bottom,
+            size: 0.35,
+        }
+    }
+}
+
+/// The remote-debugging port chosen at startup (see
+/// `webext::enable_remote_debugging`), managed so the DevTools commands can
+/// build the frontend URL. 0 means remote debugging is off (non-Windows).
+pub struct DevtoolsPort(pub u16);
 
 /// User-Agent for page webviews. WebView2's default UA carries an `Edg/…` token,
 /// so sites that branch on the browser (e.g. Proton, which then targets its
@@ -21,6 +65,11 @@ const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
 #[derive(Default)]
 pub struct TabsState {
     pub insets: Mutex<Insets>,
+    /// The currently shown tab id (set by `activate_tab`; None for internal
+    /// pages/overlays). The docked DevTools panel is visible only while this
+    /// equals `devtools.tab_id`.
+    pub active: Mutex<Option<String>>,
+    pub devtools: Mutex<Devtools>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -72,15 +121,75 @@ pub fn tab_label(id: &str) -> String {
     format!("{TAB_PREFIX}{id}")
 }
 
-/// Only real navigable schemes plus our internal `uwb:` are allowed; anything
-/// else (javascript:, data:, …) is rejected here rather than trusting the
-/// frontend to have normalized it. file: is deliberately in — local documents
-/// opened via the OS file association or a typed path render like in any
-/// browser.
-fn check_scheme(url: &Url) -> Result<(), String> {
+/// Decide what a webview's new-window request (window.open / target="_blank" /
+/// middle-click) should do, uniformly for tab pages and the extension popup.
+///
+/// - A genuine popup — window.open() called with an explicit size or position,
+///   the way OAuth logins open a small centered window — must get a real window
+///   handle back, or the page's postMessage-to-opener / popup.close() never
+///   fires and the sign-in hangs. `Allow` lets WebView2 open its default popup
+///   (SetHandled(false)), which returns a non-null handle and shares our
+///   browsing profile/cookies.
+/// - Plain target="_blank" and featureless window.open() carry no size/position
+///   and become a foreground tab, like Chrome.
+/// - A deep link (mailto:, steam://, …) is offered to the OS via the chrome UI.
+pub(crate) fn route_new_window(
+    app: &AppHandle,
+    source_id: &str,
+    url: &Url,
+    features: &tauri::webview::NewWindowFeatures,
+) -> NewWindowResponse<tauri::Wry> {
+    match scheme_kind(url) {
+        SchemeKind::Web => {
+            if matches!(url.scheme(), "http" | "https")
+                && (features.size().is_some() || features.position().is_some())
+            {
+                return NewWindowResponse::Allow;
+            }
+            open_in_new_tab(app, source_id, url);
+            NewWindowResponse::Deny
+        }
+        SchemeKind::External => {
+            emit_tab_event(app, source_id, "external-url", url.to_string());
+            NewWindowResponse::Deny
+        }
+        SchemeKind::Internal => NewWindowResponse::Deny,
+    }
+}
+
+/// How a URL relates to a tab webview.
+#[derive(PartialEq, Clone, Copy)]
+enum SchemeKind {
+    /// A document the engine renders in the tab: web, local file, our uwb: pages.
+    Web,
+    /// A deep link into another app (mailto:, tel:, steam://, vscode://,
+    /// slack://, magnet:, …). Not a document — Chrome hands these to the OS
+    /// shell so the associated app launches. We do the same, behind a prompt.
+    External,
+    /// Engine-internal or inert schemes (about:, data:, javascript:, blob:,
+    /// chrome:, view-source:). Chrome never shells these out and neither do we;
+    /// they're simply refused as a top-frame load.
+    Internal,
+}
+
+fn scheme_kind(url: &Url) -> SchemeKind {
     match url.scheme() {
-        "http" | "https" | "file" | "uwb" => Ok(()),
-        other => Err(format!("unsupported url scheme: {other}")),
+        "http" | "https" | "file" | "uwb" => SchemeKind::Web,
+        "about" | "blob" | "data" | "javascript" | "vbscript" | "chrome" | "edge"
+        | "devtools" | "view-source" | "ws" | "wss" => SchemeKind::Internal,
+        _ => SchemeKind::External,
+    }
+}
+
+/// Only real navigable schemes plus our internal `uwb:` are allowed for the
+/// user-driven `create_tab`/`navigate_tab` commands; anything else (javascript:,
+/// data:, a raw deep link, …) is rejected here rather than trusting the frontend
+/// to have normalized it. file: is deliberately in — local documents opened via
+/// the OS file association or a typed path render like in any browser.
+fn check_scheme(url: &Url) -> Result<(), String> {
+    match scheme_kind(url) {
+        SchemeKind::Web => Ok(()),
+        _ => Err(format!("unsupported url scheme: {}", url.scheme())),
     }
 }
 
@@ -109,18 +218,77 @@ fn content_rect(
     ))
 }
 
+/// Given the full content rect and the DevTools config, return the page rect
+/// (what tab webviews fill) and the native inspector rect (the panel minus its
+/// control strip). The panel occupies `size` of the content along the docked
+/// edge; both slices are clamped so neither collapses.
+fn devtools_split(
+    pos: LogicalPosition<f64>,
+    size: LogicalSize<f64>,
+    dt: &Devtools,
+) -> (
+    (LogicalPosition<f64>, LogicalSize<f64>),
+    (LogicalPosition<f64>, LogicalSize<f64>),
+) {
+    let frac = dt.size.clamp(0.15, 0.85);
+    match dt.dock {
+        Dock::Bottom => {
+            let panel_h = (size.height * frac).clamp(DEVTOOLS_MIN, (size.height - DEVTOOLS_MIN).max(DEVTOOLS_MIN));
+            let page_h = (size.height - panel_h).max(1.0);
+            let page = (pos, LogicalSize::new(size.width, page_h));
+            let inspector = (
+                LogicalPosition::new(pos.x, pos.y + page_h + DEVTOOLS_STRIP),
+                LogicalSize::new(size.width, (panel_h - DEVTOOLS_STRIP).max(1.0)),
+            );
+            (page, inspector)
+        }
+        Dock::Right => {
+            let panel_w = (size.width * frac).clamp(DEVTOOLS_MIN, (size.width - DEVTOOLS_MIN).max(DEVTOOLS_MIN));
+            let page_w = (size.width - panel_w).max(1.0);
+            let page = (pos, LogicalSize::new(page_w, size.height));
+            let inspector = (
+                LogicalPosition::new(pos.x + page_w + DEVTOOLS_STRIP, pos.y),
+                LogicalSize::new((panel_w - DEVTOOLS_STRIP).max(1.0), size.height),
+            );
+            (page, inspector)
+        }
+    }
+}
+
 pub fn apply_bounds_to_all(app: &AppHandle) {
     let Some(window) = app.get_window("main") else {
         return;
     };
-    let insets = *app.state::<TabsState>().insets.lock().unwrap_or_else(|e| e.into_inner());
+    let state = app.state::<TabsState>();
+    let insets = *state.insets.lock().unwrap_or_else(|e| e.into_inner());
     let Ok((pos, size)) = content_rect(&window, insets) else {
         return;
     };
+    let dt = state.devtools.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let active = state.active.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    // The panel shows only when its bound tab is the one on screen.
+    let showing = dt.tab_id.is_some() && dt.tab_id == active;
+
+    // The rect tab webviews fill: the full content area, or the page slice when
+    // the panel is docked over this tab.
+    let ((page_pos, page_size), inspector) = if showing {
+        devtools_split(pos, size, &dt)
+    } else {
+        ((pos, size), (pos, size))
+    };
     for (label, webview) in app.webviews() {
         if label.starts_with(TAB_PREFIX) {
-            let _ = webview.set_position(pos);
-            let _ = webview.set_size(size);
+            let _ = webview.set_position(page_pos);
+            let _ = webview.set_size(page_size);
+        }
+    }
+    if let Some(panel) = app.get_webview(DEVTOOLS_LABEL) {
+        if showing {
+            let _ = panel.set_position(inspector.0);
+            let _ = panel.set_size(inspector.1);
+            let _ = panel.show();
+        } else {
+            let _ = panel.hide();
         }
     }
 }
@@ -129,6 +297,7 @@ pub fn apply_bounds_to_all(app: &AppHandle) {
 pub async fn create_tab(
     app: AppHandle,
     state: tauri::State<'_, TabsState>,
+    port: tauri::State<'_, DevtoolsPort>,
     id: String,
     url: String,
 ) -> Result<(), String> {
@@ -159,31 +328,30 @@ pub async fn create_tab(
             emit_tab_event(&app_title, &id_title, "title", title);
         })
         .on_navigation(move |url| {
-            // Only real navigable schemes may drive the top frame — the same
-            // policy as `check_scheme`. This stops a page from stranding the
-            // tab on a blank white page: the "open a blank window, then set its
-            // location" popup pattern (which we can't fully honour, since a
-            // denied window.open() returns null) otherwise leaves the frame at
-            // about:blank, and data:/javascript: top-frame loads are a phishing
-            // vector Chrome blocks too. Main-frame only — iframes (ads,
-            // sandboxes) fire a different WebView2 event and are unaffected, so
-            // the countless legitimate about:blank iframes still load.
-            let ok = matches!(url.scheme(), "http" | "https" | "file" | "uwb");
-            if ok {
-                emit_tab_event(&app_nav, &id_nav, "url", url.to_string());
+            // Main-frame only — iframes (ads, sandboxes) fire a different
+            // WebView2 event and are unaffected, so legitimate about:blank
+            // iframes still load.
+            match scheme_kind(&url) {
+                // A real document: allow it and report the address.
+                SchemeKind::Web => {
+                    emit_tab_event(&app_nav, &id_nav, "url", url.to_string());
+                    true
+                }
+                // A deep link to another app (mailto:, steam://, …): cancel the
+                // top-frame load (which would otherwise strand the tab on a
+                // blank page) and offer to hand it to the OS, like Chrome.
+                SchemeKind::External => {
+                    emit_tab_event(&app_nav, &id_nav, "external-url", url.to_string());
+                    false
+                }
+                // about:/data:/javascript: top-frame loads are inert or a
+                // phishing vector Chrome blocks; refuse without prompting.
+                SchemeKind::Internal => false,
             }
-            ok
         })
         // window.open() / target="_blank" raise NewWindowRequested instead of
         // navigating; without a handler the engine silently drops the request.
-        // Route the URL to the chrome UI, which opens it as a regular tab.
-        // Deny keeps the engine from spawning its own popup window; it also
-        // means window.open() returns null to the page, so opener-based popup
-        // flows (some OAuth logins) don't work — no worse than before.
-        .on_new_window(move |url, _features| {
-            open_in_new_tab(&app_new, &id_new, &url);
-            NewWindowResponse::Deny
-        })
+        .on_new_window(move |url, features| route_new_window(&app_new, &id_new, &url, &features))
         .on_page_load(move |_webview, payload| {
             let started = matches!(payload.event(), PageLoadEvent::Started);
             // Never surface a non-navigable URL (about:blank etc.) as the tab's
@@ -211,6 +379,13 @@ pub async fn create_tab(
     builder = builder.browser_extensions_enabled(true);
     if let Some(dir) = crate::extensions::extensions_dir(&app) {
         builder = builder.extensions_path(dir);
+    }
+    // Enable Chromium remote debugging on the browsing-profile browser process
+    // so the docked DevTools panel can attach. Must match the identical args on
+    // every browsing-profile webview (ext host/popup) or WebView2 rejects the
+    // mismatched environment.
+    if let Some(args) = crate::webext::browsing_browser_args(port.0) {
+        builder = builder.additional_browser_args(&args);
     }
 
     // Hide the currently visible tab; the new webview stacks on top.
@@ -244,7 +419,15 @@ pub async fn navigate_tab(app: AppHandle, id: String, url: String) -> Result<(),
 }
 
 #[tauri::command]
-pub async fn close_tab(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn close_tab(app: AppHandle, state: tauri::State<'_, TabsState>, id: String) -> Result<(), String> {
+    // If the docked DevTools was inspecting this tab, unbind it so the panel
+    // doesn't linger (it hides on the next layout).
+    {
+        let mut dt = state.devtools.lock().unwrap_or_else(|e| e.into_inner());
+        if dt.tab_id.as_deref() == Some(id.as_str()) {
+            dt.tab_id = None;
+        }
+    }
     let webview = app
         .get_webview(&tab_label(&id))
         .ok_or("tab webview not found")?;
@@ -254,7 +437,14 @@ pub async fn close_tab(app: AppHandle, id: String) -> Result<(), String> {
 /// Show the webview for `id`, hide every other tab webview.
 /// Pass no id to hide all tabs (internal pages like the dashboard).
 #[tauri::command]
-pub async fn activate_tab(app: AppHandle, id: Option<String>) -> Result<(), String> {
+pub async fn activate_tab(
+    app: AppHandle,
+    state: tauri::State<'_, TabsState>,
+    id: Option<String>,
+) -> Result<(), String> {
+    // Record which tab is on screen so the layout knows whether the docked
+    // DevTools panel (bound to a specific tab) should be visible.
+    *state.active.lock().unwrap_or_else(|e| e.into_inner()) = id.clone();
     let active = id.map(|i| tab_label(&i));
     for (label, webview) in app.webviews() {
         if !label.starts_with(TAB_PREFIX) {
@@ -272,6 +462,9 @@ pub async fn activate_tab(app: AppHandle, id: Option<String>) -> Result<(), Stri
             crate::webext::suspend(&webview);
         }
     }
+    // Re-run geometry: give the shown tab the page slice (or full area) and
+    // show/hide the DevTools panel to match the new active tab.
+    apply_bounds_to_all(&app);
     Ok(())
 }
 
@@ -316,15 +509,148 @@ pub async fn tab_find(
     webview.eval(&js).map_err(|e| e.to_string())
 }
 
-/// Open the native Chromium DevTools window for a tab (Elements, Console,
-/// Network, Sources — the real inspector). Driven by the toolbar button, F12
-/// and Ctrl+Shift+I.
+/// Open the native Chromium DevTools *floating window* for a tab. Kept as an
+/// internal fallback; the UI drives the docked panel (`devtools_open`) instead.
 #[tauri::command]
 pub async fn tab_devtools(app: AppHandle, id: String) -> Result<(), String> {
     let webview = app
         .get_webview(&tab_label(&id))
         .ok_or("tab webview not found")?;
     crate::webext::open_devtools(&webview);
+    Ok(())
+}
+
+/// The DevTools frontend URL served by Chromium's remote-debugging endpoint,
+/// pointed at a specific page target. Served over http (unlike `devtools://`,
+/// which a child webview can't load), so it drops straight into a panel webview.
+fn inspector_url(port: u16, target: &str) -> String {
+    format!(
+        "http://127.0.0.1:{port}/devtools/inspector.html?ws=127.0.0.1:{port}/devtools/page/{target}"
+    )
+}
+
+/// Open (or re-target) the *docked* DevTools panel over tab `id` — the real
+/// Chromium inspector embedded in a child webview whose bounds we control,
+/// instead of WebView2's detached floating window. Resolves the tab's CDP
+/// target, then creates the panel webview (first time) or navigates the reused
+/// one, binds it to this tab, and lays out the split.
+#[tauri::command]
+pub async fn devtools_open(
+    app: AppHandle,
+    state: tauri::State<'_, TabsState>,
+    port: tauri::State<'_, DevtoolsPort>,
+    id: String,
+) -> Result<(), String> {
+    let port = port.0;
+    if port == 0 {
+        return Err("remote debugging is unavailable on this platform".into());
+    }
+    let webview = app
+        .get_webview(&tab_label(&id))
+        .ok_or("tab webview not found")?;
+    let target = crate::webext::resolve_target_id(&webview)
+        .ok_or("could not resolve the page's DevTools target")?;
+    let parsed = Url::parse(&inspector_url(port, &target)).map_err(|e| e.to_string())?;
+
+    state.devtools.lock().unwrap_or_else(|e| e.into_inner()).tab_id = Some(id.clone());
+
+    if let Some(panel) = app.get_webview(DEVTOOLS_LABEL) {
+        panel.navigate(parsed).map_err(|e| e.to_string())?;
+    } else {
+        let window = app.get_window("main").ok_or("main window not found")?;
+        let insets = *state.insets.lock().unwrap_or_else(|e| e.into_inner());
+        let (pos, size) = content_rect(&window, insets).map_err(|e| e.to_string())?;
+        let dt = state.devtools.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let (_, inspector) = devtools_split(pos, size, &dt);
+        let builder = tauri::webview::WebviewBuilder::new(DEVTOOLS_LABEL, WebviewUrl::External(parsed))
+            // Hand drag back to WebView2 so the inspector's own draggable
+            // dividers/resizers behave; no tab hooks so we don't intercept its
+            // keys, and no extensions in the tools UI.
+            .disable_drag_drop_handler();
+        let panel = window
+            .add_child(builder, inspector.0, inspector.1)
+            .map_err(|e| e.to_string())?;
+        // Fresh child webviews can stay blank until their bounds actually
+        // change (see extensions.rs); nudge a first paint.
+        crate::webext::force_repaint(&panel);
+    }
+    apply_bounds_to_all(&app);
+    Ok(())
+}
+
+/// Hide the docked DevTools panel (unbinds it; the webview stays alive, hidden,
+/// for fast reuse). The page reclaims the full content area.
+#[tauri::command]
+pub async fn devtools_close(
+    app: AppHandle,
+    state: tauri::State<'_, TabsState>,
+) -> Result<(), String> {
+    state.devtools.lock().unwrap_or_else(|e| e.into_inner()).tab_id = None;
+    apply_bounds_to_all(&app);
+    Ok(())
+}
+
+/// Switch the panel between bottom and right docking.
+#[tauri::command]
+pub async fn devtools_set_dock(
+    app: AppHandle,
+    state: tauri::State<'_, TabsState>,
+    dock: String,
+) -> Result<(), String> {
+    let d = if dock == "right" { Dock::Right } else { Dock::Bottom };
+    state.devtools.lock().unwrap_or_else(|e| e.into_inner()).dock = d;
+    apply_bounds_to_all(&app);
+    Ok(())
+}
+
+/// Resize the panel to `size` (fraction of the content area). Called by the
+/// frontend's splitter drag on release.
+#[tauri::command]
+pub async fn devtools_set_size(
+    app: AppHandle,
+    state: tauri::State<'_, TabsState>,
+    size: f64,
+) -> Result<(), String> {
+    state.devtools.lock().unwrap_or_else(|e| e.into_inner()).size = size.clamp(0.15, 0.85);
+    apply_bounds_to_all(&app);
+    Ok(())
+}
+
+/// Open WebView2's built-in print preview for a tab (Ctrl+P / toolbar), the
+/// same browser print UI Chrome shows.
+#[tauri::command]
+pub async fn tab_print(app: AppHandle, id: String) -> Result<(), String> {
+    let webview = app
+        .get_webview(&tab_label(&id))
+        .ok_or("tab webview not found")?;
+    crate::webext::print(&webview);
+    Ok(())
+}
+
+/// Answer a permission prompt (camera/mic/geolocation/notifications/clipboard)
+/// the chrome UI raised from a `permission` tab-event.
+#[tauri::command]
+pub async fn permission_respond(app: AppHandle, id: String, allow: bool) -> Result<(), String> {
+    crate::webext::permission_respond(&app, id, allow);
+    Ok(())
+}
+
+/// Answer an HTTP basic-auth prompt. Omit the credentials to cancel the load.
+#[tauri::command]
+pub async fn basic_auth_respond(
+    app: AppHandle,
+    id: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
+    crate::webext::basic_auth_respond(&app, id, username, password);
+    Ok(())
+}
+
+/// Resolve a certificate-error interstitial: proceed anyway, or cancel.
+#[tauri::command]
+pub async fn cert_respond(app: AppHandle, id: String, proceed: bool) -> Result<(), String> {
+    crate::webext::cert_respond(&app, id, proceed);
     Ok(())
 }
 
@@ -376,6 +702,61 @@ pub async fn clear_browsing_data(app: AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Hand a deep link (mailto:, tel:, steam://, vscode://, magnet:, …) to the OS
+/// so the associated app launches — the same handoff Chrome does after its
+/// "Open in another app?" prompt. The frontend gates this behind a confirm
+/// dialog; we re-check the scheme here so a compromised frontend can't turn it
+/// into an arbitrary file/URL launcher (only genuine external schemes pass —
+/// never http/file/javascript/etc.).
+#[tauri::command]
+pub async fn open_external(url: String) -> Result<(), String> {
+    let parsed = Url::parse(&url).map_err(|e| e.to_string())?;
+    if scheme_kind(&parsed) != SchemeKind::External {
+        return Err(format!("not an external scheme: {}", parsed.scheme()));
+    }
+    os_open(parsed.as_str())
+}
+
+/// Launch a URL through the OS shell's protocol association. Uses ShellExecuteW
+/// on Windows (the injection-safe path — no cmd/start parsing), and the
+/// platform opener elsewhere.
+#[cfg(windows)]
+fn os_open(url: &str) -> Result<(), String> {
+    use windows::core::{w, HSTRING, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let file = HSTRING::from(url);
+    // A return value > 32 means success (legacy ShellExecute contract).
+    let hinst = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if hinst.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(format!("no app is registered to open {url}"))
+    }
+}
+
+#[cfg(not(windows))]
+fn os_open(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(target_os = "macos"))]
+    let program = "xdg-open";
+    std::process::Command::new(program)
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// The chrome UI reports the size of its top bar and sidebar so tab webviews
