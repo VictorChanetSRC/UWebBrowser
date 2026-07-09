@@ -3,11 +3,11 @@ import { History as HistoryIcon, Trash2, X } from "lucide-react";
 import { clearHistory, deleteVisit, getVisits, type Visit } from "../lib/history";
 import { SearchField } from "./SearchField";
 import { Button } from "@/components/ui/button";
-import { ARMED_CLASS } from "@/components/ui/confirm-button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Favicon } from "@/components/ui/favicon";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import { useConfirm } from "@/hooks/use-confirm";
 import { cn } from "@/lib/utils";
 import { hostOf } from "@/lib/url";
 
@@ -83,10 +83,10 @@ export function History({ onOpen }: Props) {
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<RangeKey>("all");
   const [shownCount, setShownCount] = useState(PAGE_SIZE);
-  const clearAll = useConfirm(() => {
+  const clearAll = () => {
     clearHistory();
     setVisits([]);
-  });
+  };
 
   // One clock per render keeps "Today" headings and range bounds consistent.
   const now = Date.now();
@@ -154,19 +154,14 @@ export function History({ onOpen }: Props) {
                 onValueChange={handleQuery}
               />
             </div>
-            <Button
-              className={cn(
-                "h-[54px] flex-none rounded-xl px-5",
-                // Arm state reads as destructive, not just a label swap.
-                clearAll.armed && ARMED_CLASS,
-              )}
+            <ConfirmButton
+              className="h-[54px] flex-none rounded-xl px-5"
               disabled={visits.length === 0}
-              onClick={clearAll.trigger}
-              aria-live="polite"
+              onConfirm={clearAll}
             >
               <Trash2 className="size-3.5" aria-hidden />
-              {clearAll.armed ? "Click again to confirm" : "Clear all"}
-            </Button>
+              Clear all
+            </ConfirmButton>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {RANGES.map((r) => (
@@ -188,21 +183,16 @@ export function History({ onOpen }: Props) {
         </div>
 
         {groups.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-border py-16 text-center">
-            <HistoryIcon className="size-6 text-ink-600" aria-hidden />
-            <div>
-              <div className="text-[13.5px] text-ink-300">
-                {visits.length === 0
-                  ? "No history yet"
-                  : "Nothing matches these filters"}
-              </div>
-              <div className="mt-1 text-[12.5px] text-ink-500">
-                {visits.length === 0
-                  ? "Pages you visit will show up here as you browse."
-                  : "Try a different search or a wider time range."}
-              </div>
-            </div>
-          </div>
+          <EmptyState
+            icon={<HistoryIcon className="size-6 text-ink-600" aria-hidden />}
+            title={visits.length === 0 ? "No history yet" : "Nothing matches these filters"}
+          >
+            <p className="text-[12.5px] text-ink-500">
+              {visits.length === 0
+                ? "Pages you visit will show up here as you browse."
+                : "Try a different search or a wider time range."}
+            </p>
+          </EmptyState>
         ) : (
           <div className="flex flex-col gap-6">
             {groups.map((group) => (
@@ -229,7 +219,7 @@ export function History({ onOpen }: Props) {
                             className="size-3.5 rounded-[3px]"
                           />
                         </span>
-                        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] text-ink-200">
+                        <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-200">
                           {visit.title || hostOf(visit.url)}
                           <span className="font-mono text-[12px] text-ink-500">
                             {" · "}

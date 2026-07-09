@@ -1,7 +1,7 @@
 import { Gamepad2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { PLATFORMS } from "@/lib/platforms";
-import { fmtNumber, MISSING } from "@/lib/format";
+import { fmtNumber, MISSING, sourceError } from "@/lib/format";
 import { positivePct, priceLabel, releaseLabel } from "@/lib/steam";
 import { jobRunning } from "@/lib/build-job";
 import { usePolled } from "@/hooks/use-polled";
@@ -62,7 +62,7 @@ function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<
   return (
     <DataCard
       label="Your game"
-      error={!!appid && !stats && error ? `Steam didn't answer: ${error}` : null}
+      error={!!appid && !stats && error ? sourceError("Steam", error) : null}
       loading={!!appid && !stats}
       skeleton={
         <StatGrid>

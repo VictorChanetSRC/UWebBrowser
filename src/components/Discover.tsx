@@ -4,8 +4,10 @@ import type { LinkItem } from "../lib/engines";
 import { LinkCard, LinkGrid } from "./LinkCard";
 import { SearchField } from "./SearchField";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { RailButton } from "@/components/ui/rail-button";
 import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/utils";
 
@@ -73,7 +75,7 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
           >
             <Label className="px-2.5 pb-2 text-[10.5px]">Browse</Label>
             <RailButton
-              name="All"
+              label="All"
               count={total}
               active={category === null}
               onClick={() => pick(null)}
@@ -81,7 +83,7 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
             {matches.map((group) => (
               <RailButton
                 key={group.category}
-                name={group.category}
+                label={group.category}
                 count={group.items.length}
                 active={category === group.category}
                 onClick={() => pick(group.category)}
@@ -141,50 +143,14 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
             ))}
 
             {groups.length === 0 && (
-              <div className="flex flex-col items-center gap-1 rounded-[10px] border border-dashed border-border px-6 py-14 text-center">
-                <p className="text-sm text-ink-300">Nothing matches "{query}".</p>
+              <EmptyState title={`Nothing matches "${query}".`}>
                 <p className="text-[12.5px] text-ink-500">Try another word.</p>
-              </div>
+              </EmptyState>
             )}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function RailButton({
-  name,
-  count,
-  active,
-  onClick,
-}: {
-  name: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={cn(
-        "flex w-full items-center justify-between gap-3 rounded-[7px] px-2.5 py-1.5 text-left text-[13px] transition-[background-color,color] duration-[130ms] ease-brand",
-        active
-          ? "bg-ink-800 font-medium text-ink-100"
-          : "text-ink-400 hover:bg-ink-800/60 hover:text-ink-200",
-      )}
-      aria-pressed={active}
-      onClick={onClick}
-    >
-      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{name}</span>
-      <span
-        className={cn(
-          "flex-none font-mono text-[10.5px] tabular-nums",
-          count === 0 ? "text-ink-600" : "text-ink-500",
-        )}
-      >
-        {count}
-      </span>
-    </button>
   );
 }
 

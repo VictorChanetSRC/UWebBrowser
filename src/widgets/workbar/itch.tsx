@@ -1,11 +1,10 @@
 import { Store } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { fmtNumber } from "@/lib/format";
+import { fmtNumber, sourceError } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
-import { Skeleton } from "@/components/ui/skeleton";
 import { VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
-import { WidgetCard, WidgetHint } from "./shared";
+import { RowSkeletons, WidgetCard, WidgetHint } from "./shared";
 
 /** Account-wide itch.io totals, riding along in the rail. */
 export type ItchWidget = { id: string; type: "itch" };
@@ -31,16 +30,14 @@ function ItchBody({ itchApiKey, active, onOpen }: BarBodyProps<ItchWidget>) {
   if (!data && error) {
     return (
       <WidgetCard>
-        <WidgetHint>itch.io didn't answer: {error}</WidgetHint>
+        <WidgetHint>{sourceError("itch.io", error)}</WidgetHint>
       </WidgetCard>
     );
   }
   if (!data) {
     return (
       <WidgetCard>
-        {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-4 rounded-md" />
-        ))}
+        <RowSkeletons count={3} className="h-4 rounded-md" />
       </WidgetCard>
     );
   }

@@ -61,11 +61,11 @@ function SteamGameBody({ widget, games, active, onOpen }: BarBodyProps<SteamGame
               className="aspect-[460/215] w-full rounded-md bg-ink-800"
             />
           )}
-          <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold">
+          <div className="truncate text-[13px] font-semibold">
             {game.name || data.details?.name || `App ${appid}`}
           </div>
           <div className="flex items-baseline justify-between gap-2 text-[12px]">
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap text-ink-400">
+            <span className="truncate text-ink-400">
               {data.reviews?.review_score_desc ?? "No reviews yet"}
               {positive !== null && ` · ${positive}%`}
             </span>

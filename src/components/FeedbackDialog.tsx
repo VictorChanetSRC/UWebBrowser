@@ -7,6 +7,7 @@ import {
 } from "../lib/github";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
 type Props = {
@@ -65,7 +66,7 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label="Send feedback"
-        className="w-[520px] max-w-[calc(100%-48px)] animate-rise rounded-2xl border border-ink-800 bg-ink-900 p-6 shadow-modal"
+        className="w-[520px] max-w-[calc(100%-48px)] animate-rise rounded-2xl border border-border bg-popover p-6 shadow-modal"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -108,7 +109,7 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
             placeholder={kind === "bug" ? "Short summary of the bug" : "Short summary of the idea"}
             aria-label="Title"
           />
-          <textarea
+          <Textarea
             value={details}
             onChange={(e) => setDetails(e.target.value)}
             placeholder={
@@ -118,7 +119,7 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
             }
             aria-label="Details"
             rows={5}
-            className="w-full min-w-0 select-text resize-none rounded-lg border border-input bg-ink-900 p-3 font-sans text-sm leading-relaxed text-ink-100 outline-none transition-[border-color] duration-[130ms] ease-brand placeholder:text-ink-500 hover:border-ink-600 focus:border-ink-400"
+            className="leading-relaxed"
           />
           {kind === "bug" && (
             <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-background p-3">

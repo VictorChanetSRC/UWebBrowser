@@ -1,5 +1,52 @@
 import { cn } from "@/lib/utils";
 
+type Point = readonly [number, number];
+
+/**
+ * The filled line trace both {@link Sparkline} and the work bar's HourTrace
+ * render: a quiet area under a hairline stroke, drawn from explicit points in a
+ * `width × height` viewBox. Fewer than two points shows the resting bar. Callers
+ * own how points map from their data (index vs wall-clock x, fixed vs windowed
+ * y) — this owns the SVG so the drawing lives once.
+ */
+export function Trace({
+  points,
+  width = 100,
+  height,
+  className,
+}: {
+  points: readonly Point[];
+  width?: number;
+  height: number;
+  /** Rendered height utility (e.g. `h-6`); also sizes the resting bar. */
+  className?: string;
+}) {
+  if (points.length < 2) {
+    return <div className={cn("w-full rounded-[4px] bg-ink-800/50", className)} />;
+  }
+  const line = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${points[0][0].toFixed(1)},${height} ${line} ${points[points.length - 1][0].toFixed(1)},${height}`;
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className={cn("w-full", className)}
+      aria-hidden
+    >
+      <polygon points={area} className="fill-ink-800" />
+      <polyline
+        points={line}
+        fill="none"
+        strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        className="stroke-ink-400"
+      />
+    </svg>
+  );
+}
+
 /**
  * Tiny rolling history graph. Values are 0..max; the newest sample sits at
  * the right edge and the trace grows leftwards until `capacity` is reached.
@@ -15,14 +62,8 @@ export function Sparkline({
   max?: number;
   className?: string;
 }) {
-  const w = 100;
   const h = 24;
-
-  if (values.length < 2) {
-    return <div className={cn("h-6 w-full rounded-[4px] bg-ink-800/50", className)} />;
-  }
-
-  const step = w / (capacity - 1);
+  const step = 100 / (capacity - 1);
   const offset = capacity - values.length;
   const points = values.map((v, i) => {
     const x = (offset + i) * step;
@@ -31,26 +72,5 @@ export function Sparkline({
     const y = h - 1 - (clamped / max) * (h - 2);
     return [x, y] as const;
   });
-  const line = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const area = `${points[0][0].toFixed(1)},${h} ${line} ${points[points.length - 1][0].toFixed(1)},${h}`;
-
-  return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      preserveAspectRatio="none"
-      className={cn("h-6 w-full", className)}
-      aria-hidden
-    >
-      <polygon points={area} className="fill-ink-800" />
-      <polyline
-        points={line}
-        fill="none"
-        strokeWidth={1.5}
-        vectorEffect="non-scaling-stroke"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        className="stroke-ink-400"
-      />
-    </svg>
-  );
+  return <Trace points={points} height={h} className={cn("h-6", className)} />;
 }

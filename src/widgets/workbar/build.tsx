@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Hammer } from "lucide-react";
-import { ipc, type EngineInstall } from "@/lib/ipc";
-import { matchEngine, mergeEngines, type UnrealProject } from "@/lib/unreal";
+import { ipc } from "@/lib/ipc";
+import { matchEngine, type UnrealProject } from "@/lib/unreal";
 import {
   cancelBuildJob,
   jobProgressCaption,
@@ -13,15 +13,15 @@ import {
 } from "@/lib/build-job";
 import { elapsedSince } from "@/lib/format";
 import { useBuildJob } from "@/hooks/use-build-job";
+import { useEngines } from "@/hooks/use-engines";
 import { useUnrealState } from "@/hooks/use-unreal-state";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { LiveDot } from "@/components/ui/live-dot";
 import { Progress } from "@/components/ui/progress";
 import { VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps, type BarEditorProps } from "./define";
-import { WidgetCard, WidgetHint } from "./shared";
+import { ChipRow, WidgetCard, WidgetHint } from "./shared";
 
 /** The Unreal build in flight — start one, watch it, or open the editor. */
 export type BuildWidget = {
@@ -42,15 +42,9 @@ function trackedProject(
 function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
   const job = useBuildJob();
   const [unrealState] = useUnrealState();
-  const [detected, setDetected] = useState<EngineInstall[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!active) return;
-    ipc.detectEngines().then(setDetected).catch(() => {});
-  }, [active]);
-
-  const engines = mergeEngines(detected, unrealState.manualEngines);
+  const engines = useEngines(active, unrealState.manualEngines);
   const project = trackedProject(widget, unrealState.projects);
   const engine = project ? matchEngine(project, engines) : null;
   const running = job !== null && jobRunning(job);
@@ -102,7 +96,7 @@ function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
     return (
       <WidgetCard>
         <div
-          className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold text-ink-100"
+          className="truncate text-[13px] font-semibold text-ink-100"
           title={project!.uprojectPath}
         >
           {project!.name}
@@ -121,7 +115,7 @@ function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
 
   return (
     <WidgetCard>
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold text-ink-100">
+      <div className="truncate text-[13px] font-semibold text-ink-100">
         {job.projectName}
       </div>
       <div className="flex min-w-0 items-center gap-2">
@@ -129,7 +123,7 @@ function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {
         {running && !job.cancelRequested && <LiveDot />}
         <span
           className={cn(
-            "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px]",
+            "min-w-0 flex-1 truncate text-[12px]",
             running || job.cancelRequested
               ? "text-ink-300"
               : cn("font-medium", jobVerdictClass(job)),
@@ -176,21 +170,13 @@ function BuildEditor({ widget, onPatch }: BarEditorProps<BuildWidget>) {
   if (unrealState.projects.length < 2) return null;
   const selected = trackedProject(widget, unrealState.projects);
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-border p-2.5 pl-3.5">
-      <Label className="mr-1 text-[10px]">Builds</Label>
-      {unrealState.projects.map((project) => (
-        <Button
-          key={project.id}
-          variant="chip"
-          size="chip"
-          className="h-[24px] px-2.5 text-[11px]"
-          aria-pressed={project.id === selected?.id}
-          onClick={() => onPatch({ projectId: project.id })}
-        >
-          {project.name}
-        </Button>
-      ))}
-    </div>
+    <ChipRow
+      className="border-t border-border p-2.5 pl-3.5"
+      label="Builds"
+      options={unrealState.projects.map((project) => ({ key: project.id, label: project.name }))}
+      selected={selected?.id ?? null}
+      onPick={(projectId) => onPatch({ projectId })}
+    />
   );
 }
 

@@ -1,4 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { loadStr, saveStr } from "./storage";
 
 /**
  * GitHub interconnect: where the repo lives, prefilled-issue URL building
@@ -72,23 +73,23 @@ let sessionRecorded = false;
  * they haven't clicked through or snoozed us recently.
  */
 export async function startGithubSession(): Promise<boolean> {
-  let sessions = Number(localStorage.getItem(SESSIONS_KEY)) || 0;
+  let sessions = Number(loadStr(SESSIONS_KEY)) || 0;
   let updated = false;
 
   if (!sessionRecorded) {
     sessionRecorded = true;
     sessions += 1;
-    localStorage.setItem(SESSIONS_KEY, String(sessions));
+    saveStr(SESSIONS_KEY, String(sessions));
 
     const version = await getVersion().catch(() => "");
     if (version) {
-      const last = localStorage.getItem(LAST_VERSION_KEY);
+      const last = loadStr(LAST_VERSION_KEY);
       updated = last !== null && last !== version;
-      localStorage.setItem(LAST_VERSION_KEY, version);
+      saveStr(LAST_VERSION_KEY, version);
     }
   }
 
-  const state = localStorage.getItem(NUDGE_KEY);
+  const state = loadStr(NUDGE_KEY);
   if (state === "done") return false;
   if (state && Date.now() < Number(state)) return false;
   // Post-update still waits out the first session or two, so the very first
@@ -98,10 +99,10 @@ export async function startGithubSession(): Promise<boolean> {
 
 /** They clicked through to the repo — never ask again. */
 export function markStarNudgeDone() {
-  localStorage.setItem(NUDGE_KEY, "done");
+  saveStr(NUDGE_KEY, "done");
 }
 
 /** "Not now": quiet for two weeks, then eligible again. */
 export function snoozeStarNudge() {
-  localStorage.setItem(NUDGE_KEY, String(Date.now() + NUDGE_SNOOZE_MS));
+  saveStr(NUDGE_KEY, String(Date.now() + NUDGE_SNOOZE_MS));
 }

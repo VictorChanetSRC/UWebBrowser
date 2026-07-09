@@ -269,7 +269,7 @@ function ToolbarImpl(props: Props) {
                   className="fixed inset-0 z-40 cursor-default"
                   onClick={() => setPageInfo(false)}
                 />
-                <div className="absolute left-0 top-7 z-50 w-72 animate-rise rounded-xl border border-ink-800 bg-ink-900 p-3.5 shadow-modal">
+                <div className="absolute left-0 top-7 z-50 w-72 animate-rise rounded-xl border border-ink-700 bg-ink-900 p-3.5 shadow-popover">
                   <div className="flex items-center gap-2">
                     {secure ? (
                       <Lock className="size-4 text-ink-300" strokeWidth={1.8} aria-hidden />
@@ -416,7 +416,7 @@ function ToolbarImpl(props: Props) {
                         <Search className="size-3" strokeWidth={1.8} aria-hidden />
                       )}
                     </span>
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <span className="min-w-0 flex-1 truncate">
                       {row.input}
                       <span className="text-ink-500">
                         {" · "}
@@ -429,7 +429,7 @@ function ToolbarImpl(props: Props) {
                     <span className="flex size-5 flex-none items-center justify-center">
                       <Favicon url={row.entry.url} className="size-3.5 rounded-[3px]" />
                     </span>
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <span className="min-w-0 flex-1 truncate">
                       {row.entry.title || hostOf(row.entry.url)}
                       <span className="font-mono text-[12px] text-ink-500">
                         {" · "}
@@ -447,9 +447,9 @@ function ToolbarImpl(props: Props) {
       {storeId && (
         <Button
           variant="ghost"
-          size="none"
+          size="pill"
           disabled={installing}
-          className="h-[30px] flex-none gap-1.5 rounded-[7px] border border-ink-700 px-2.5 text-[11.5px] text-ink-200 hover:bg-ink-800 disabled:opacity-60 [&_svg]:size-3.5"
+          className="flex-none border border-ink-700 px-2.5 text-[11.5px] text-ink-200 hover:bg-ink-800 disabled:opacity-60"
           onClick={async () => {
             setInstalling(true);
             try {
@@ -535,8 +535,8 @@ function GithubStars({ onClick }: { onClick: () => void }) {
   return (
     <Button
       variant="ghost"
-      size="none"
-      className="h-[30px] gap-1.5 rounded-[7px] px-2 text-ink-400 [&_svg]:size-3.5"
+      size="pill"
+      className="px-2 text-ink-400"
       onClick={onClick}
       aria-label="Star UWebBrowser on GitHub"
       title="Star UWebBrowser on GitHub"
@@ -556,8 +556,8 @@ function DiscordButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
       variant="ghost"
-      size="none"
-      className="h-[30px] gap-1.5 rounded-[7px] px-2 text-ink-400 [&_svg]:size-3.5"
+      size="pill"
+      className="px-2 text-ink-400"
       onClick={onClick}
       aria-label="Join the UWebBrowser Discord"
       title="Join the UWebBrowser Discord"

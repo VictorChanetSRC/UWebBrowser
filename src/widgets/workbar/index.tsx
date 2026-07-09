@@ -1,5 +1,4 @@
-import type { LucideIcon } from "lucide-react";
-import type { ShopEntry } from "@/lib/widget-shop";
+import { createWidgetRegistry } from "../registry";
 import type { BarBodyProps, BarEditorProps, BarWidgetSpec } from "./define";
 import steamGame, { type SteamGameWidget } from "./steam-game";
 import steamPlayers, { type SteamPlayersWidget } from "./steam-players";
@@ -40,23 +39,14 @@ export const BAR_WIDGETS: readonly BarWidgetSpec<any>[] = [
   links,
 ];
 
-export const BAR_SPECS = Object.fromEntries(
-  BAR_WIDGETS.map((spec) => [spec.type, spec]),
-) as Record<WidgetType, BarWidgetSpec<any>>;
+const registry = createWidgetRegistry<WidgetType, BarWidgetSpec<any>>(BAR_WIDGETS);
 
+export const BAR_SPECS = registry.specs;
 /** Every registered type, for storage validation. */
-export const BAR_WIDGET_TYPES = BAR_WIDGETS.map((spec) => spec.type) as WidgetType[];
-
-export const BAR_ICONS: Record<WidgetType, LucideIcon> = Object.fromEntries(
-  BAR_WIDGETS.map((spec) => [spec.type, spec.icon]),
-) as Record<WidgetType, LucideIcon>;
-
+export const BAR_WIDGET_TYPES = registry.types;
+export const BAR_ICONS = registry.icons;
 /** The shop shelf: every widget's listing plus identity and credit. */
-export const BAR_SHOP: ShopEntry<WidgetType>[] = BAR_WIDGETS.map((spec) => ({
-  type: spec.type as WidgetType,
-  creator: spec.creator,
-  ...spec.shop,
-}));
+export const BAR_SHOP = registry.shop;
 
 /** A fresh instance of a widget, ready to drop on the bar. */
 export function newBarWidget(type: WidgetType): Widget {

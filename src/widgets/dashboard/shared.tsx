@@ -4,12 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { LiveDot } from "@/components/ui/live-dot";
-import { Skeleton } from "@/components/ui/skeleton";
+import { TracksGameChips } from "../shared";
 import type { DashConfigProps, DashWidgetBase } from "./define";
 
-// The game-tracking helper is shared across both widget surfaces; re-exported
-// here so dashboard widgets keep importing it from one place.
+// Shared helpers re-exported so dashboard widgets keep one local import point.
 export { trackedGame } from "../types";
+export { RowSkeletons, ChipRow } from "../shared";
+// The dashboard's empty-state one-liner is the roomier "tile" size of WidgetHint.
+export { WidgetHint as TileHint } from "../shared";
 
 /**
  * The building blocks dashboard widget bodies are made of. Compose these and
@@ -60,19 +62,9 @@ export function CardLink({ children, onClick }: { children: ReactNode; onClick: 
   );
 }
 
-export function RowSkeletons({ count = 3, className }: { count?: number; className?: string }) {
-  return (
-    <div className="flex flex-col gap-2.5">
-      {Array.from({ length: count }, (_, i) => (
-        <Skeleton key={i} className={cn("h-11 rounded-lg", className)} />
-      ))}
-    </div>
-  );
-}
-
-/** A quiet one-liner for empty and not-set-up-yet states. */
-export function TileHint({ children }: { children: ReactNode }) {
-  return <p className="text-ink-400">{children}</p>;
+/** The list wrapper the feed-style tiles put their {@link FeedRow}s in. */
+export function FeedList({ children }: { children: ReactNode }) {
+  return <ul className="flex list-none flex-col">{children}</ul>;
 }
 
 /** Row shell shared by the feed-style tiles: full-width button, hairlines. */
@@ -123,7 +115,7 @@ export function Stat({
 }) {
   return (
     <div className="flex flex-col gap-1.5 rounded-[10px] border border-border bg-background p-3.5">
-      <span className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap text-[22px] font-semibold tabular-nums tracking-[-0.02em]">
+      <span className="flex items-center gap-2 truncate text-[22px] font-semibold tabular-nums tracking-[-0.02em]">
         {live && <LiveDot className={muted ? "bg-ink-400" : undefined} />}
         {value}
       </span>
@@ -147,40 +139,10 @@ export function ConfigStrip({ children }: { children: ReactNode }) {
   );
 }
 
-/** One labelled row of exclusive chips inside a {@link ConfigStrip}. */
-export function ChipRow({
-  label,
-  options,
-  selected,
-  onPick,
-}: {
-  label: string;
-  options: { key: string; label: string }[];
-  selected: string | null;
-  onPick: (key: string) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 p-2 pl-2.5">
-      <Label className="mr-1 text-[10px]">{label}</Label>
-      {options.map((option) => (
-        <Button
-          key={option.key}
-          variant="chip"
-          size="chip"
-          className="h-[24px] px-2.5 text-[11px]"
-          aria-pressed={option.key === selected}
-          onClick={() => onPick(option.key)}
-        >
-          {option.label}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
 /**
- * The shared Config for widgets that track one of your games (game, buzz,
- * build). Shows nothing until there's actually a choice to make.
+ * The Config for widgets that track one of your games (game, buzz, build):
+ * the shared chip picker inside the tile's floating config strip. Shows nothing
+ * until there's actually a choice to make.
  */
 export function TracksGameConfig<W extends DashWidgetBase & { gameId: string | null }>({
   widget,
@@ -190,13 +152,7 @@ export function TracksGameConfig<W extends DashWidgetBase & { gameId: string | n
   if (games.length < 2) return null;
   return (
     <ConfigStrip>
-      <ChipRow
-        label="Tracks"
-        options={games.map((g) => ({ key: g.id, label: g.name || "Untitled" }))}
-        selected={(games.find((g) => g.id === widget.gameId) ?? games[0])?.id ?? null}
-        // The key is a real game id; TS just can't see that through the generic.
-        onPick={(gameId) => onPatch({ gameId } as Partial<W>)}
-      />
+      <TracksGameChips widget={widget} games={games} onPatch={onPatch} />
     </ConfigStrip>
   );
 }

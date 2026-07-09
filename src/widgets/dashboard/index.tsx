@@ -1,6 +1,5 @@
-import type { LucideIcon } from "lucide-react";
 import type { Game } from "@/lib/config";
-import type { ShopEntry } from "@/lib/widget-shop";
+import { createWidgetRegistry } from "../registry";
 import type { DashBodyProps, DashConfigProps, DashWidgetSpec, TileSpan } from "./define";
 import game, { type GameWidget } from "./game";
 import build, { type BuildWidget } from "./build";
@@ -50,23 +49,14 @@ export const DASH_WIDGETS: readonly DashWidgetSpec<any>[] = [
   github,
 ];
 
-export const DASH_SPECS = Object.fromEntries(
-  DASH_WIDGETS.map((spec) => [spec.type, spec]),
-) as Record<DashWidgetType, DashWidgetSpec<any>>;
+const registry = createWidgetRegistry<DashWidgetType, DashWidgetSpec<any>>(DASH_WIDGETS);
 
+export const DASH_SPECS = registry.specs;
 /** Every registered type, for storage validation. */
-export const DASH_WIDGET_TYPES = DASH_WIDGETS.map((spec) => spec.type) as DashWidgetType[];
-
-export const DASH_ICONS: Record<DashWidgetType, LucideIcon> = Object.fromEntries(
-  DASH_WIDGETS.map((spec) => [spec.type, spec.icon]),
-) as Record<DashWidgetType, LucideIcon>;
-
+export const DASH_WIDGET_TYPES = registry.types;
+export const DASH_ICONS = registry.icons;
 /** The shop shelf: every widget's listing plus identity and credit. */
-export const DASH_SHOP: ShopEntry<DashWidgetType>[] = DASH_WIDGETS.map((spec) => ({
-  type: spec.type as DashWidgetType,
-  creator: spec.creator,
-  ...spec.shop,
-}));
+export const DASH_SHOP = registry.shop;
 
 /** The footprint a widget is born with; every tile can be resized later. */
 export function defaultTileSpan(type: DashWidgetType): TileSpan {

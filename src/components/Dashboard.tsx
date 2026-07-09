@@ -35,8 +35,9 @@ import { DashboardShop } from "./WidgetShop";
 import { cn } from "@/lib/utils";
 import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Section } from "@/components/ui/section";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { Section, SECTION_HAIRLINE } from "@/components/ui/section";
 
 // UnrealHub builds its sections and stat tiles from these.
 export { Stat, StatGrid } from "@/widgets/dashboard";
@@ -215,28 +216,31 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
             />
           ) : (
             <>
-              <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-                <div>
-                  <Label className="mb-2.5 block">Home · {todayLabel}</Label>
-                  <h1 className="text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-                    {greetingText}
-                  </h1>
-                </div>
-                <div className="flex gap-2.5">
-                  <Button
-                    variant={customizing ? "primary" : "outline"}
-                    onClick={() => setCustomizing((v) => !v)}
-                  >
-                    {customizing ? "Done" : "Customize"}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setEditing(true)}>
-                    Edit setup
-                  </Button>
-                </div>
-              </header>
+              <PageHeader
+                kicker={`Home · ${todayLabel}`}
+                title={greetingText}
+                actions={
+                  <div className="flex gap-2.5">
+                    <Button
+                      variant={customizing ? "primary" : "outline"}
+                      onClick={() => setCustomizing((v) => !v)}
+                    >
+                      {customizing ? "Done" : "Customize"}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEditing(true)}>
+                      Edit setup
+                    </Button>
+                  </div>
+                }
+              />
 
               {customizing && (
-                <section className="flex animate-rise flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t border-border pt-[30px]">
+                <section
+                  className={cn(
+                    "flex animate-rise flex-wrap items-center justify-between gap-x-6 gap-y-3",
+                    SECTION_HAIRLINE,
+                  )}
+                >
                   <div className="flex flex-wrap items-center gap-4">
                     <Button onClick={() => setShopOpen(true)}>
                       <Store className="size-3.5" aria-hidden />
@@ -262,8 +266,7 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
               )}
 
               {widgets.length === 0 ? (
-                <div className="flex flex-col items-center gap-4 rounded-[18px] border border-dashed border-ink-700 px-6 py-14 text-center text-ink-400">
-                  <p>A blank home page. Build yours from the widget shop.</p>
+                <EmptyState title="A blank home page. Build yours from the widget shop.">
                   <Button
                     onClick={() => {
                       setCustomizing(true);
@@ -273,7 +276,7 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
                     <Store className="size-3.5" aria-hidden />
                     Browse widgets
                   </Button>
-                </div>
+                </EmptyState>
               ) : (
                 <div
                   className="grid grid-flow-dense grid-cols-[repeat(auto-fill,minmax(300px,1fr))] auto-rows-[200px] gap-4"
@@ -484,7 +487,7 @@ function BentoTile({
               {String(index + 1).padStart(2, "0")}
             </span>
             <Icon className="size-3.5 flex-none text-ink-400" aria-hidden />
-            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium text-ink-200">
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-200">
               {title}
             </span>
             <Button

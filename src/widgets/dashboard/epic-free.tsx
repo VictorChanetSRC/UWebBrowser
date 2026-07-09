@@ -1,10 +1,10 @@
 import { Gift } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { shortDate, usd } from "@/lib/format";
+import { shortDate, sourceError, usd } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
-import { CardLink, DataCard, FeedRow, RowSkeletons, TileHint } from "./shared";
+import { CardLink, DataCard, FeedList, FeedRow, RowSkeletons, TileHint } from "./shared";
 
 /** Epic's giveaway rotation: free right now, and what's queued next. */
 export type EpicFreeWidget = { id: string; type: "epicFree"; span: TileSpan };
@@ -21,7 +21,7 @@ function EpicFreeBody({ active, onOpen }: DashBodyProps<EpicFreeWidget>) {
   return (
     <DataCard
       label="Epic · Free games"
-      error={!games && error ? `Epic didn't answer: ${error}` : null}
+      error={!games && error ? sourceError("Epic", error) : null}
       loading={!games}
       skeleton={<RowSkeletons count={4} className="h-12" />}
       links={
@@ -32,7 +32,7 @@ function EpicFreeBody({ active, onOpen }: DashBodyProps<EpicFreeWidget>) {
     >
       {games?.length === 0 && <TileHint>Nothing in the giveaway rotation right now.</TileHint>}
       {games && games.length > 0 && (
-        <ul className="flex list-none flex-col">
+        <FeedList>
           {games.slice(0, 6).map((game, index) => (
             <FeedRow
               key={`${game.url}-${index}`}
@@ -49,7 +49,7 @@ function EpicFreeBody({ active, onOpen }: DashBodyProps<EpicFreeWidget>) {
                 />
               )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap text-sm text-ink-200">
+                <span className="truncate text-sm text-ink-200">
                   {game.title}
                 </span>
                 <span className="font-mono text-[11px] text-ink-500">
@@ -69,7 +69,7 @@ function EpicFreeBody({ active, onOpen }: DashBodyProps<EpicFreeWidget>) {
               )}
             </FeedRow>
           ))}
-        </ul>
+        </FeedList>
       )}
     </DataCard>
   );

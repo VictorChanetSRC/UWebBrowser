@@ -83,9 +83,9 @@ export function Select({
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
-        className="flex h-7 w-full items-center gap-1.5 rounded-md border border-border bg-ink-900 px-1.5 text-xs text-ink-300 outline-none transition-[border-color] duration-[130ms] ease-brand hover:border-ink-600 focus-visible:border-ink-400"
+        className="flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-ink-900 px-1.5 text-xs text-ink-300 outline-none transition-[border-color] duration-[130ms] ease-brand hover:border-ink-600 focus-visible:border-ink-400"
       >
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left">
+        <span className="min-w-0 flex-1 truncate text-left">
           {selected?.label ?? options[0]?.label ?? ""}
         </span>
         <ChevronDown
@@ -115,7 +115,7 @@ export function Select({
                 commit(index);
               }}
               className={cn(
-                "cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] px-2 py-1.5 text-xs",
+                "cursor-pointer truncate rounded-[5px] px-2 py-1.5 text-xs",
                 index === active ? "bg-ink-800 text-ink-100" : "text-ink-300",
                 option.value === value && "font-medium",
               )}

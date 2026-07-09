@@ -1,6 +1,6 @@
 import { Store } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { fmtNumber } from "@/lib/format";
+import { fmtNumber, sourceError } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import {
   Table,
@@ -31,7 +31,7 @@ function ItchBody({ itchApiKey, active, onOpen }: DashBodyProps<ItchWidget>) {
   return (
     <DataCard
       label="itch.io"
-      error={!!key && !games && error ? `itch.io didn't answer: ${error}` : null}
+      error={!!key && !games && error ? sourceError("itch.io", error) : null}
       loading={!!key && !games}
       skeleton={<RowSkeletons />}
       links={<CardLink onClick={() => onOpen("https://itch.io/dashboard")}>Dashboard</CardLink>}

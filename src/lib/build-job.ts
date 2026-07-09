@@ -198,12 +198,18 @@ export function jobProgressCaption(job: BuildJob): string {
   return `${pct}${formatEta(eta)} left`;
 }
 
+/** Resolve the notification permission, prompting once if still default.
+ *  Shared by the "ask early" path in startBuildJob and the finish notification
+ *  so the two can't drift on how the grant is requested. */
+async function ensureNotifyPermission(): Promise<boolean> {
+  if (await isPermissionGranted()) return true;
+  return (await requestPermission()) === "granted";
+}
+
 async function notifyFinished(job: BuildJob) {
   if (job.cancelRequested) return;
   try {
-    let granted = await isPermissionGranted();
-    if (!granted) granted = (await requestPermission()) === "granted";
-    if (!granted) return;
+    if (!(await ensureNotifyPermission())) return;
     const ok = job.exitCode === 0;
     const issues =
       job.errors > 0 || job.warnings > 0
@@ -359,9 +365,7 @@ export async function startBuildJob(
   rateSamples = [];
   loadHistoryStats(projectName, req);
   // Ask early so the finish notification doesn't hit a pending permission.
-  isPermissionGranted()
-    .then((granted) => (granted ? null : requestPermission()))
-    .catch(() => {});
+  ensureNotifyPermission().catch(() => {});
   publish();
   try {
     await ipc.startBuild({ ...req, jobId: id });

@@ -3,7 +3,7 @@ import { Star } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { GITHUB_REPO_URL, markStarNudgeDone, snoozeStarNudge } from "../lib/github";
 import { fmtNumber } from "../lib/format";
-import { Button } from "@/components/ui/button";
+import { NudgeCard } from "@/components/ui/nudge-card";
 
 type Props = {
   /** Opens the repo in a browser tab. */
@@ -40,30 +40,19 @@ export function StarNudge({ onOpen, onDismiss, onToast }: Props) {
   };
 
   return (
-    <div className="absolute bottom-5 right-3 z-40 w-[360px] animate-rise rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-modal">
-      <div className="flex items-start gap-3">
-        <span className="flex size-9 flex-none items-center justify-center rounded-lg bg-ink-800 text-ink-200">
-          <Star className="size-4" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] text-ink-100">Is UWebBrowser saving you time?</div>
-          <div className="mt-0.5 text-[11.5px] leading-snug text-ink-500">
-            {stars !== null && stars > 0
-              ? `A star on GitHub is the best way to support it — join ${fmtNumber(stars)} ${
-                  stars === 1 ? "developer" : "developers"
-                } who already have.`
-              : "It's free and open source — a star on GitHub is the best way to support it."}
-          </div>
-        </div>
-      </div>
-      <div className="mt-3 flex items-center justify-end gap-1.5">
-        <Button size="sm" variant="ghost" onClick={later}>
-          Not now
-        </Button>
-        <Button size="sm" variant="primary" onClick={star}>
-          Star on GitHub
-        </Button>
-      </div>
-    </div>
+    <NudgeCard
+      icon={<Star aria-hidden />}
+      title="Is UWebBrowser saving you time?"
+      body={
+        stars !== null && stars > 0
+          ? `A star on GitHub is the best way to support it — join ${fmtNumber(stars)} ${
+              stars === 1 ? "developer" : "developers"
+            } who already have.`
+          : "It's free and open source — a star on GitHub is the best way to support it."
+      }
+      primaryLabel="Star on GitHub"
+      onPrimary={star}
+      onDismiss={later}
+    />
   );
 }

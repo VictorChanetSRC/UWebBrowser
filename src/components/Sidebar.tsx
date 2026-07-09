@@ -37,18 +37,20 @@ function SidebarImpl({
     <aside className="flex h-full w-full flex-col border-r border-border bg-background">
       <div className="flex items-center justify-between px-[18px] pb-1 pt-3.5">
         <Label className="text-[10.5px]">Work bar</Label>
-        <button
-          className="rounded-md px-[7px] py-[3px] font-mono text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-500 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100"
+        <Button
+          variant="ghost"
+          size="none"
+          className="rounded-md px-[7px] py-[3px] font-mono text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-500"
           onClick={onCustomize}
         >
           Customize
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-2.5 pb-4 pt-3">
         {shown.map((widget) => (
           <section key={widget.id} className="flex flex-col gap-1">
-            <Label className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-2 pb-1 text-[10.5px]">
+            <Label className="min-w-0 truncate px-2 pb-1 text-[10.5px]">
               {barWidgetTitle(widget)}
             </Label>
             <BarWidgetBody
@@ -75,8 +77,10 @@ function SidebarImpl({
       </div>
 
       <div className="border-t border-border p-2.5">
-        <button
-          className="group flex w-full items-center gap-2.5 rounded-[7px] p-2 text-[13px] font-medium text-ink-300 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100"
+        <Button
+          variant="ghost"
+          size="none"
+          className="group w-full justify-start gap-2.5 rounded-[7px] p-2 text-[13px] font-medium text-ink-300"
           onClick={onDiscover}
         >
           <Compass
@@ -84,7 +88,7 @@ function SidebarImpl({
             aria-hidden
           />
           <span>Discover</span>
-        </button>
+        </Button>
       </div>
     </aside>
   );

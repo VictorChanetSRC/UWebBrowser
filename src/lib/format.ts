@@ -74,6 +74,12 @@ export function feedDate(utcSeconds: number): string {
   return days < 7 ? ago(utcSeconds) : shortDate(utcSeconds);
 }
 
+/** The one "a data source didn't respond" line every live widget shows, so the
+ *  ten network widgets phrase the failure identically. */
+export function sourceError(source: string, error: unknown): string {
+  return `${source} didn't answer: ${error}`;
+}
+
 /** USD cents to "$12.34" — Steam and Epic both quote cents here. */
 export function usd(cents: number): string {
   const dollars = cents / 100;

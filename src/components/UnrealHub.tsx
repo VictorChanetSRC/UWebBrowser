@@ -41,7 +41,10 @@ import { elapsedSince, fmtNumber, formatDuration, gb, MISSING } from "@/lib/form
 import { copyText } from "@/lib/url";
 import { DashSection, Stat, StatGrid } from "./Dashboard";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select } from "@/components/ui/select";
@@ -160,16 +163,11 @@ export function UnrealHub({ games }: { games: Game[] }) {
   return (
     <div className="absolute inset-0 @container overflow-y-auto">
       <div className="mx-auto flex max-w-[1460px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
-        <header>
-          <Label className="mb-2.5 block">Unreal toolbench</Label>
-          <h1 className="text-[40px] font-semibold leading-[1.1] tracking-[-0.025em]">
-            Build without leaving.
-          </h1>
-          <p className="mt-3 max-w-[52ch] text-[15px] leading-[1.55] text-ink-400">
-            Link your engines and projects once. Package, cook and compile from
-            here, and keep an eye on the machine while it works.
-          </p>
-        </header>
+        <PageHeader
+          kicker="Unreal toolbench"
+          title="Build without leaving."
+          description="Link your engines and projects once. Package, cook and compile from here, and keep an eye on the machine while it works."
+        />
 
         {notice && <p className="text-sm text-ink-300">{notice}</p>}
 
@@ -191,7 +189,7 @@ export function UnrealHub({ games }: { games: Game[] }) {
                   {engine.version}
                 </span>
                 <Tag>{SOURCE_LABEL[engine.source]}</Tag>
-                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-ink-500">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-500">
                   {engine.path}
                 </span>
                 {engine.source === "manual" && (
@@ -230,7 +228,7 @@ export function UnrealHub({ games }: { games: Game[] }) {
                     <Tag>UE {project.engineAssociation}</Tag>
                   )}
                   {!project.hasCode && <Tag>Blueprint only</Tag>}
-                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-ink-500">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-500">
                     {project.uprojectPath}
                   </span>
                   {games.length > 0 && (
@@ -409,7 +407,7 @@ function BuildSection({
           {action === "package" && project && (
             <div className="flex items-center gap-2.5">
               <Label className="w-[72px] flex-none text-[10px]">Output</Label>
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-ink-500">
+              <span className="min-w-0 truncate font-mono text-[11.5px] text-ink-500">
                 {project.archiveDir || `${project.dir}\\Packaged\\${platform}`}
               </span>
               <Button size="sm" className="flex-none" onClick={pickArchiveDir}>
@@ -559,26 +557,16 @@ const STAGE_SHADES: Record<string, string> = {
 
 function HistorySection() {
   const job = useBuildJob();
-  // Reload when the running job settles — its record is on disk by then.
+  // Reload when the running job settles — its record is on disk by then — and
+  // when a clear bumps `version`.
   const finishedJobId = job !== null && !jobRunning(job) ? job.id : null;
-  const [records, setRecords] = useState<BuildRecord[] | null>(null);
+  const [version, setVersion] = useState(0);
+  const { data: records } = useAsync(
+    () => ipc.buildHistory().catch(() => [] as BuildRecord[]),
+    [finishedJobId, version],
+  );
   const [issuesOpen, setIssuesOpen] = useState<{ id: string; sev: 1 | 2 } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
-  const confirmTimer = useRef<number | undefined>(undefined);
-
-  useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
-
-  useEffect(() => {
-    let stale = false;
-    ipc
-      .buildHistory()
-      .then((r) => !stale && setRecords(r))
-      .catch(() => !stale && setRecords([]));
-    return () => {
-      stale = true;
-    };
-  }, [finishedJobId]);
 
   const play = async (record: BuildRecord) => {
     setNotice(null);
@@ -602,18 +590,11 @@ function HistorySection() {
   };
 
   const clearAll = async () => {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      window.clearTimeout(confirmTimer.current);
-      confirmTimer.current = window.setTimeout(() => setConfirmClear(false), 4000);
-      return;
-    }
-    setConfirmClear(false);
     setNotice(null);
     try {
       await ipc.clearBuildHistory();
-      setRecords([]);
       setIssuesOpen(null);
+      setVersion((v) => v + 1);
     } catch (error) {
       setNotice(String(error));
     }
@@ -631,13 +612,12 @@ function HistorySection() {
       )}
 
       {records !== null && records.length === 0 && (
-        <div className="rounded-xl border border-dashed border-ink-700 px-8 py-10 text-center">
-          <p className="text-ink-300">No builds recorded yet.</p>
-          <p className="mt-1.5 text-[12.5px] leading-[1.55] text-ink-500">
-            Run a build or package above. Every run lands here with its
-            duration, errors and warnings, and a Play button for packaged games.
+        <EmptyState title="No builds recorded yet.">
+          <p className="text-[12.5px] leading-[1.55] text-ink-500">
+            Run a build or package above. Every run lands here with its duration, errors and
+            warnings, and a Play button for packaged games.
           </p>
-        </div>
+        </EmptyState>
       )}
 
       <div className="flex flex-col gap-3">
@@ -659,9 +639,13 @@ function HistorySection() {
 
       {records !== null && records.length > 0 && (
         <div>
-          <Button variant="ghost" onClick={clearAll}>
-            {confirmClear ? "Click again to clear everything" : "Clear history"}
-          </Button>
+          <ConfirmButton
+            variant="ghost"
+            onConfirm={clearAll}
+            confirmLabel="Click again to clear everything"
+          >
+            Clear history
+          </ConfirmButton>
         </div>
       )}
     </DashSection>
@@ -690,7 +674,7 @@ function HistoryCard({
   return (
     <article className="flex flex-col gap-3.5 rounded-xl border border-border bg-ink-900 p-4">
       <div className="flex min-w-0 items-center gap-3">
-        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[15px] font-semibold text-ink-100">
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink-100">
           {record.project}
         </span>
         <Tag>{ACTIONS.find((a) => a.key === record.action)?.label ?? record.action}</Tag>
@@ -935,7 +919,7 @@ function IssueRow({ issue }: { issue: Issue }) {
         {formatDuration(issue.firstT)}
       </span>
       <span
-        className="min-w-0 flex-1 select-text overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-ink-300"
+        className="min-w-0 flex-1 select-text truncate font-mono text-[11.5px] text-ink-300"
         title={issue.text}
       >
         {issue.text}
@@ -1045,16 +1029,6 @@ function Row({ first, children }: { first: boolean; children: ReactNode }) {
         !first && "border-t border-border",
       )}
     >
-      {children}
-    </div>
-  );
-}
-
-/** The designed empty state: a dashed-border box with centered muted copy,
- *  shared by the Engines, Projects and Build sections. */
-function EmptyState({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-dashed border-ink-700 px-8 py-10 text-center text-ink-400">
       {children}
     </div>
   );

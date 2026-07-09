@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Plus, Puzzle, Store, Trash2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ipc, type ExtInfo } from "@/lib/ipc";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const POPUP_WIDTH = 400;
@@ -134,33 +135,35 @@ export function ExtensionBar({
           ))
         )}
       </div>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="none"
         onClick={onBrowseStore}
         aria-label="Open the Chrome Web Store"
         title="Browse the Chrome Web Store"
-        className="flex flex-none items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-ink-300 transition-colors duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100"
+        className="flex-none gap-1 rounded-md px-2 py-1 text-[11.5px] [&_svg]:size-3.5"
       >
-        <Store className="size-3.5" aria-hidden />
+        <Store aria-hidden />
         Web Store
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="ghost"
+        size="none"
         onClick={loadUnpacked}
         aria-label="Load unpacked extension"
         title="Load unpacked extension"
-        className="flex flex-none items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-ink-400 transition-colors duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100"
+        className="flex-none gap-1 rounded-md px-2 py-1 text-[11.5px] [&_svg]:size-3.5"
       >
-        <Plus className="size-3.5" aria-hidden />
+        <Plus aria-hidden />
         Load unpacked
-      </button>
+      </Button>
 
       {menu && (
         <>
           {/* Click-away layer. */}
           <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           <div
-            className="fixed z-50 min-w-40 overflow-hidden rounded-md border border-border bg-background py-1 shadow-lg"
+            className="fixed z-50 min-w-40 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-popover"
             style={{ left: menu.x, top: menu.y }}
           >
             <button

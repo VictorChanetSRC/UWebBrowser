@@ -1,6 +1,6 @@
 import { CalendarClock } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { usd } from "@/lib/format";
+import { sourceError, usd } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import {
@@ -14,6 +14,7 @@ import {
   ChipRow,
   ConfigStrip,
   DataCard,
+  FeedList,
   FeedRow,
   RowSkeletons,
   TileHint,
@@ -49,7 +50,7 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
   return (
     <DataCard
       label={`Steam · ${category.label}`}
-      error={!items && error ? `Steam didn't answer: ${error}` : null}
+      error={!items && error ? sourceError("Steam", error) : null}
       loading={!items}
       skeleton={<RowSkeletons count={5} className="h-10" />}
       links={<CardLink onClick={() => onOpen(category.url)}>Open Steam</CardLink>}
@@ -58,7 +59,7 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
       {/* Coming soon is about what a game looks like and when it lands, so
           those rows get the big key art; the other lists stay dense. */}
       {items && items.length > 0 && widget.category === "coming_soon" && (
-        <ul className="flex list-none flex-col">
+        <FeedList>
           {items.slice(0, 8).map((item, index) => (
             <FeedRow
               key={`${item.appid}-${index}`}
@@ -82,10 +83,10 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
               </span>
             </FeedRow>
           ))}
-        </ul>
+        </FeedList>
       )}
       {items && items.length > 0 && widget.category !== "coming_soon" && (
-        <ul className="flex list-none flex-col">
+        <FeedList>
           {items.slice(0, 8).map((item, index) => (
             <FeedRow
               key={`${item.appid}-${index}`}
@@ -99,7 +100,7 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
                 loading="lazy"
                 className="aspect-[184/69] w-[74px] flex-none rounded bg-ink-800 object-cover"
               />
-              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-ink-200">
+              <span className="min-w-0 flex-1 truncate text-sm text-ink-200">
                 {item.name}
               </span>
               <span className="flex-none font-mono text-[11px] tabular-nums text-ink-500">
@@ -110,7 +111,7 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
               </span>
             </FeedRow>
           ))}
-        </ul>
+        </FeedList>
       )}
     </DataCard>
   );

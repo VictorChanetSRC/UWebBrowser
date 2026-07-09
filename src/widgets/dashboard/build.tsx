@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Hammer } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ipc, type EngineInstall } from "@/lib/ipc";
-import { makeProject, matchEngine, mergeEngines, projectForGame } from "@/lib/unreal";
+import { ipc } from "@/lib/ipc";
+import { makeProject, matchEngine, projectForGame } from "@/lib/unreal";
 import {
   cancelBuildJob,
   jobProgressCaption,
@@ -14,11 +14,13 @@ import {
 } from "@/lib/build-job";
 import { elapsedSince } from "@/lib/format";
 import { useBuildJob } from "@/hooks/use-build-job";
+import { useEngines } from "@/hooks/use-engines";
 import { useUnrealState } from "@/hooks/use-unreal-state";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { LiveDot } from "@/components/ui/live-dot";
 import { Progress } from "@/components/ui/progress";
+import { Tag } from "@/components/ui/tag";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
 import { CardLink, DataCard, TileHint, TracksGameConfig, trackedGame } from "./shared";
@@ -38,18 +40,10 @@ export type BuildWidget = {
 function BuildBody({ widget, games, active, onUnreal }: DashBodyProps<BuildWidget>) {
   const game = trackedGame(widget.gameId, games);
   const [unrealState, setUnrealState] = useUnrealState();
-  const [detected, setDetected] = useState<EngineInstall[]>([]);
   const [error, setError] = useState<string | null>(null);
   const job = useBuildJob();
 
-  // Engine detection scans the disk/registry; only run it for a live tile (the
-  // work-bar twin gates the same way), not for an inert shop preview.
-  useEffect(() => {
-    if (!active) return;
-    ipc.detectEngines().then(setDetected).catch(() => {});
-  }, [active]);
-
-  const engines = mergeEngines(detected, unrealState.manualEngines);
+  const engines = useEngines(active, unrealState.manualEngines);
 
   const project = game ? projectForGame(unrealState.projects, game) : null;
   const engine = project ? matchEngine(project, engines) : null;
@@ -132,11 +126,9 @@ function BuildBody({ widget, games, active, onUnreal }: DashBodyProps<BuildWidge
         <div className="flex h-full flex-col gap-3">
           <div className="flex items-center gap-3">
             <span className="font-semibold">{project.name}</span>
-            <span className="flex-none rounded-full border border-border px-2 py-0.5 font-mono text-[10.5px] text-ink-500">
-              {engine ? `UE ${engine.version}` : "no engine"}
-            </span>
+            <Tag>{engine ? `UE ${engine.version}` : "no engine"}</Tag>
           </div>
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-ink-500">
+          <span className="truncate font-mono text-[11.5px] text-ink-500">
             {project.uprojectPath}
           </span>
 

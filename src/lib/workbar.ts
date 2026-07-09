@@ -1,6 +1,6 @@
 import { type LinkItem } from "./engines";
 import { loadJson, saveJson } from "./storage";
-import { moveBy, patchById, removeById } from "./list-ops";
+import { moveBy, patchById, removeById, uid } from "./list-ops";
 import {
   BAR_WIDGET_TYPES,
   newBarWidget,
@@ -24,8 +24,6 @@ const KEY = "uwb.workbar";
 // Pre-widget installs stored plain link sections under these keys.
 const PINS_KEY = "uwb.pins";
 const LEGACY_PINS_KEY = "gdb.pins";
-
-const uid = () => crypto.randomUUID();
 
 const statusWidgets = (): Widget[] => [
   { id: uid(), type: "steam-game", gameId: null },

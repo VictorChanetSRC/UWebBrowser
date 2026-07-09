@@ -5,6 +5,10 @@
 
 export type WithId = { id: string };
 
+/** Fresh id for a new `{ id }` list item. Shared so the dashboard board and the
+ *  work bar mint ids the same way. */
+export const uid = (): string => crypto.randomUUID();
+
 export function removeById<T extends WithId>(items: T[], id: string): T[] {
   return items.filter((item) => item.id !== id);
 }

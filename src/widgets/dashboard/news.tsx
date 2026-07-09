@@ -1,6 +1,6 @@
 import { Newspaper } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { feedDate } from "@/lib/format";
+import { feedDate, sourceError } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import {
@@ -14,6 +14,7 @@ import {
   ChipRow,
   ConfigStrip,
   DataCard,
+  FeedList,
   FeedRow,
   RowSkeletons,
   TileHint,
@@ -82,14 +83,14 @@ function NewsBody({ widget, active, onOpen }: DashBodyProps<NewsWidget>) {
   return (
     <DataCard
       label={source.label}
-      error={!items && error ? `${source.label} didn't answer: ${error}` : null}
+      error={!items && error ? sourceError(source.label, error) : null}
       loading={!items}
       skeleton={<RowSkeletons count={5} className="h-9" />}
       links={<CardLink onClick={() => onOpen(source.home)}>Open site</CardLink>}
     >
       {items?.length === 0 && <TileHint>The feed came back empty. It happens.</TileHint>}
       {items && items.length > 0 && (
-        <ul className="flex list-none flex-col">
+        <FeedList>
           {items.slice(0, 8).map((item, index) => (
             <FeedRow
               key={item.url}
@@ -105,7 +106,7 @@ function NewsBody({ widget, active, onOpen }: DashBodyProps<NewsWidget>) {
               )}
             </FeedRow>
           ))}
-        </ul>
+        </FeedList>
       )}
     </DataCard>
   );

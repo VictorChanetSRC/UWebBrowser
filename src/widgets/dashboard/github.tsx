@@ -1,13 +1,14 @@
 import { GitBranch } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { GITHUB_NEW_ISSUE_URL, GITHUB_REPO_URL } from "@/lib/github";
-import { feedDate, fmtNumber, MISSING } from "@/lib/format";
+import { feedDate, fmtNumber, MISSING, sourceError } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
 import {
   CardLink,
   DataCard,
+  FeedList,
   FeedRow,
   RowSkeletons,
   Stat,
@@ -54,7 +55,7 @@ function GithubBody({ widget, active, onOpen }: DashBodyProps<GithubWidget>) {
   return (
     <DataCard
       label="UWebBrowser on GitHub"
-      error={!stats && statsError ? `GitHub didn't answer: ${statsError}` : null}
+      error={!stats && statsError ? sourceError("GitHub", statsError) : null}
       loading={!stats}
       skeleton={<RowSkeletons count={3} />}
       links={
@@ -74,7 +75,7 @@ function GithubBody({ widget, active, onOpen }: DashBodyProps<GithubWidget>) {
       </StatGrid>
       {shown && shown.length === 0 && <TileHint>No releases published yet.</TileHint>}
       {shown && shown.length > 0 && (
-        <ul className="flex list-none flex-col">
+        <FeedList>
           {shown.map((release, index) => (
             <FeedRow
               key={release.tag}
@@ -97,7 +98,7 @@ function GithubBody({ widget, active, onOpen }: DashBodyProps<GithubWidget>) {
               )}
             </FeedRow>
           ))}
-        </ul>
+        </FeedList>
       )}
     </DataCard>
   );

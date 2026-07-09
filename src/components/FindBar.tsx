@@ -61,13 +61,13 @@ export function FindBar({ tabId, onClose }: { tabId: string; onClose: () => void
         className="w-48 bg-transparent px-1 text-[13px] text-ink-100 outline-none placeholder:text-ink-500"
       />
       <IconButton label="Previous match" disabled={empty} onClick={() => search(false, false)}>
-        <ChevronUp className="h-4 w-4" />
+        <ChevronUp />
       </IconButton>
       <IconButton label="Next match" disabled={empty} onClick={() => search(true, false)}>
-        <ChevronDown className="h-4 w-4" />
+        <ChevronDown />
       </IconButton>
       <IconButton label="Close find bar" onClick={close}>
-        <X className="h-4 w-4" />
+        <X />
       </IconButton>
     </div>
   );

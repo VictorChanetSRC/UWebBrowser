@@ -1,7 +1,7 @@
 import { MessagesSquare } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { watchLinks } from "@/lib/engines";
-import { ago } from "@/lib/format";
+import { ago, sourceError } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { Button } from "@/components/ui/button";
 import { VICTOR_CHANET } from "../types";
@@ -9,6 +9,7 @@ import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
 import {
   CardLink,
   DataCard,
+  FeedList,
   FeedRow,
   RowSkeletons,
   TileHint,
@@ -39,7 +40,7 @@ function BuzzBody({ widget, games, active, onOpen }: DashBodyProps<BuzzWidget>) 
   return (
     <DataCard
       label="Community buzz"
-      error={!!name && !posts && error ? `Reddit didn't answer: ${error}` : null}
+      error={!!name && !posts && error ? sourceError("Reddit", error) : null}
       loading={!!name && !posts}
       skeleton={<RowSkeletons count={4} />}
       links={
@@ -67,7 +68,7 @@ function BuzzBody({ widget, games, active, onOpen }: DashBodyProps<BuzzWidget>) 
             <TileHint>No recent posts mention "{name}". Time to make noise.</TileHint>
           )}
           {posts && posts.length > 0 && (
-            <ul className="flex list-none flex-col">
+            <FeedList>
               {posts.slice(0, 6).map((post, index) => (
                 <FeedRow
                   key={post.url}
@@ -82,7 +83,7 @@ function BuzzBody({ widget, games, active, onOpen }: DashBodyProps<BuzzWidget>) 
                   <span className="text-sm leading-[1.4] text-ink-200">{post.title}</span>
                 </FeedRow>
               ))}
-            </ul>
+            </FeedList>
           )}
         </>
       )}

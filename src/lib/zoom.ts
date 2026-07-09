@@ -3,15 +3,17 @@
  * navigation, so we persist the user's choice keyed by host and re-apply it when
  * a tab loads that host. Values are zoom factors (1 == 100%).
  */
+import { loadJson, saveJson } from "./storage";
+
 const KEY = "uwb.zoom";
 
 function load(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
-  } catch {
-    return {};
-  }
+  return loadJson(
+    [KEY],
+    (raw) =>
+      raw && typeof raw === "object" ? (raw as Record<string, number>) : null,
+    () => ({}),
+  );
 }
 
 /** The remembered zoom factor for a host, or 1 (100%) if none. */
@@ -29,9 +31,5 @@ export function setZoomFor(host: string, factor: number): void {
   } else {
     map[host] = factor;
   }
-  try {
-    localStorage.setItem(KEY, JSON.stringify(map));
-  } catch {
-    /* storage full / disabled — zoom just won't persist */
-  }
+  saveJson(KEY, map);
 }

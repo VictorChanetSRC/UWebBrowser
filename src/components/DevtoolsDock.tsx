@@ -77,7 +77,7 @@ export function DevtoolsDock({
   const swallow = (e: ReactPointerEvent) => e.stopPropagation();
 
   const btn =
-    "grid size-[22px] place-items-center rounded-md text-ink-400 hover:bg-ink-700 hover:text-ink-100 transition-colors";
+    "grid size-[22px] place-items-center rounded-md text-ink-400 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-700 hover:text-ink-100";
 
   return (
     <div

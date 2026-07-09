@@ -43,9 +43,11 @@ import {
   type WidgetType,
 } from "@/widgets/workbar";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RailButton } from "@/components/ui/rail-button";
 import { Tag } from "@/components/ui/tag";
 import { cn } from "@/lib/utils";
 
@@ -285,7 +287,7 @@ export function WidgetShop<T extends string>({
             <RailButton
               label="All widgets"
               count={entries.length}
-              selected={category === "all" && view.kind === "grid"}
+              active={category === "all" && view.kind === "grid"}
               onClick={() => browse("all")}
             />
             {SHOP_CATEGORIES.map((c) => {
@@ -296,7 +298,7 @@ export function WidgetShop<T extends string>({
                   key={c.key}
                   label={c.label}
                   count={size}
-                  selected={category === c.key && view.kind === "grid"}
+                  active={category === c.key && view.kind === "grid"}
                   onClick={() => browse(c.key)}
                 />
               );
@@ -390,14 +392,17 @@ export function WidgetShop<T extends string>({
                 </div>
 
                 {results.length === 0 ? (
-                  <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-ink-700 px-6 py-14">
-                    <p className="font-mono text-[12px] text-ink-400">
-                      Nothing matches &ldquo;{query}&rdquo;.
-                    </p>
+                  <EmptyState
+                    title={
+                      <span className="font-mono text-[12px] text-ink-400">
+                        Nothing matches &ldquo;{query}&rdquo;.
+                      </span>
+                    }
+                  >
                     <Button variant="link" size="none" className="text-[12.5px]" onClick={() => setQuery("")}>
                       Clear search
                     </Button>
-                  </div>
+                  </EmptyState>
                 ) : (
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
                     {results.map((entry) => (
@@ -423,34 +428,6 @@ export function WidgetShop<T extends string>({
         </div>
       </div>
     </div>
-  );
-}
-
-/* --------------------------------- rail ----------------------------------- */
-
-function RailButton({
-  label,
-  count,
-  selected,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={cn(
-        "flex items-center justify-between gap-3 rounded-lg px-2.5 py-[7px] text-left text-[12.5px] transition-[background-color,color] duration-[130ms] ease-brand",
-        selected ? "bg-ink-800 font-medium text-ink-100" : "text-ink-400 hover:bg-ink-800/60 hover:text-ink-200",
-      )}
-      aria-pressed={selected}
-      onClick={onClick}
-    >
-      <span>{label}</span>
-      <span className="font-mono text-[10.5px] tabular-nums text-ink-500">{count}</span>
-    </button>
   );
 }
 
@@ -544,7 +521,7 @@ function ShopCard<T extends string>({
         <div className="flex size-8 flex-none items-center justify-center rounded-lg border border-border bg-background">
           <Icon className="size-3.5 text-ink-300" aria-hidden />
         </div>
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-ink-100">
+        <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink-100">
           {entry.name}
         </span>
         {count > 0 && <Tag>{count > 1 ? `×${count}` : "Added"}</Tag>}
@@ -563,7 +540,7 @@ function ShopCard<T extends string>({
         {preview}
       </PreviewFit>
       <div className="pointer-events-none flex items-center justify-between gap-3 border-t border-border py-2 pl-3.5 pr-2">
-        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-600">
+        <span className="min-w-0 truncate font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-600">
           {shopCategory(entry.category).label} ·{" "}
           {onAuthor ? (
             <button

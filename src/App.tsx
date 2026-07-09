@@ -21,6 +21,7 @@ import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
 import { FindBar } from "./components/FindBar";
 import { DevtoolsDock } from "./components/DevtoolsDock";
 import { Button } from "./components/ui/button";
+import { StatusPage } from "./components/ui/status-page";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
@@ -1215,18 +1216,17 @@ export default function App() {
           {/* A crashed renderer left a blank native surface (now hidden);
               offer a recover panel in its place. */}
           {activeTab.kind === "web" && activeTab.crashed && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-8 text-center">
-              <div className="text-[15px] font-medium text-ink-100">
-                This page stopped responding
-              </div>
-              <div className="max-w-sm text-[13px] text-ink-400">
-                Its process crashed or ran out of memory. Reload to try again — you
-                won’t lose your other tabs.
-              </div>
-              <Button variant="outline" onClick={() => reloadCrashed(activeTab)}>
-                Reload page
-              </Button>
-            </div>
+            <StatusPage
+              title="This page stopped responding"
+              actions={
+                <Button variant="outline" onClick={() => reloadCrashed(activeTab)}>
+                  Reload page
+                </Button>
+              }
+            >
+              Its process crashed or ran out of memory. Reload to try again — you won’t lose
+              your other tabs.
+            </StatusPage>
           )}
 
           {/* Branded network-error page for a failed main-frame navigation. */}

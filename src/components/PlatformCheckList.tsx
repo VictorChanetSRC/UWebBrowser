@@ -64,7 +64,7 @@ function Check({
           className="min-w-0 text-[13px] font-normal text-ink-100"
           onClick={() => row?.hit?.url && onOpen(row.hit.url)}
         >
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+          <span className="truncate">
             Found · {row?.hit?.name}
           </span>
           <ArrowUpRight className="size-3 flex-none text-ink-500" aria-hidden />

@@ -20,15 +20,6 @@ export const unreal = {
   ] as LinkItem[],
 };
 
-export function faviconFor(url: string): string {
-  try {
-    const host = new URL(url).hostname;
-    return `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
-  } catch {
-    return "";
-  }
-}
-
 export function watchLinks(gameName: string): LinkItem[] {
   const q = encodeURIComponent(gameName);
   return [

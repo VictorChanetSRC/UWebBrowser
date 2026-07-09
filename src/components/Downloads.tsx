@@ -117,7 +117,7 @@ export function Downloads({
         {active > 0 && <Ring progress={progress} />}
         <Download className="size-4" aria-hidden />
         {active > 1 && (
-          <span className="absolute -bottom-0.5 -right-0.5 flex min-w-3.5 items-center justify-center rounded-full bg-signal-500 px-1 text-[9px] font-semibold leading-[13px] text-white">
+          <span className="absolute -bottom-0.5 -right-0.5 flex min-w-3.5 items-center justify-center rounded-full bg-signal-500 px-1 text-[9px] font-semibold leading-[13px] text-paper">
             {active}
           </span>
         )}
@@ -133,7 +133,7 @@ export function Downloads({
             role="dialog"
             aria-label="Downloads"
           >
-            <div className="flex items-center gap-2 border-b border-ink-800 px-3.5 py-2.5">
+            <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
               <span className="text-[12.5px] font-medium text-ink-100">Downloads</span>
               <span className="flex-1" />
               {items.some((d) => d.state !== "active") && (
@@ -157,7 +157,7 @@ export function Downloads({
             </div>
 
             {mostRecent && (
-              <div className="border-t border-ink-800 px-3.5 py-2">
+              <div className="border-t border-border px-3.5 py-2">
                 <button
                   type="button"
                   onClick={() => ipc.downloadShow(mostRecent.path).catch(() => {})}
@@ -244,7 +244,7 @@ function DownloadRow({ item, onRemove }: { item: DownloadRec; onRemove: () => vo
           title={item.state === "done" ? "Open file" : item.name}
           className={cn(
             "block w-full truncate text-left text-[12.5px] text-ink-100",
-            item.state === "done" && "hover:text-white hover:underline",
+            item.state === "done" && "hover:text-paper hover:underline",
           )}
         >
           {item.name}

@@ -4,11 +4,10 @@ import { ipc } from "@/lib/ipc";
 import { gb } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/ui/sparkline";
 import { VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
-import { WidgetCard } from "./shared";
+import { RowSkeletons, WidgetCard } from "./shared";
 
 /** CPU, GPU and memory with temps, plus disk headroom. */
 export type SystemWidget = { id: string; type: "system" };
@@ -35,9 +34,7 @@ function SystemBody({ active }: BarBodyProps<SystemWidget>) {
   if (!data) {
     return (
       <WidgetCard>
-        {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-11 rounded-md" />
-        ))}
+        <RowSkeletons count={3} className="rounded-md" />
       </WidgetCard>
     );
   }

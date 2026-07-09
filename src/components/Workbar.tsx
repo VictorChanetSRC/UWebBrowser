@@ -142,7 +142,7 @@ function BarRow({
             onChange={(e) => onPatch(spec.rename!.patch(e.target.value))}
           />
         ) : (
-          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium text-ink-200">
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-200">
             {barWidgetTitle(widget)}
           </span>
         )}

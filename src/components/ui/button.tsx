@@ -21,6 +21,9 @@ const buttonVariants = cva(
         sm: "h-7 rounded-md px-2.5 text-xs",
         chip: "h-[30px] px-[13px] text-[12.5px]",
         icon: "size-[30px] rounded-[7px] enabled:active:scale-[0.92]",
+        // A text+icon pill at icon height — the toolbar's star / Discord / "Add
+        // to UWebBrowser" affordances. Shares the icon size's 30px/7px metric.
+        pill: "h-[30px] gap-1.5 rounded-[7px] [&_svg]:size-3.5",
         none: "",
       },
     },

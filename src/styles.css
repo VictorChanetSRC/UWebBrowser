@@ -107,6 +107,10 @@
   --input: var(--color-ink-700);
   --ring: var(--color-ink-500);
   --radius: 0.5rem;
+  /* The moving highlight in the skeleton shimmer — a faint white sweep. Pulled
+     to a token so the one off-ramp colour in the loading state lives in one
+     place instead of being hand-typed as a raw rgba(). */
+  --shimmer-highlight: rgba(255, 255, 255, 0.045);
 }
 
 @theme inline {

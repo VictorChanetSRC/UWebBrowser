@@ -13,6 +13,7 @@ import { FeedbackDialog } from "./FeedbackDialog";
 import { Button } from "@/components/ui/button";
 import { ARMED_CLASS, ConfirmButton } from "@/components/ui/confirm-button";
 import { Label } from "@/components/ui/label";
+import { SECTION_HAIRLINE } from "@/components/ui/section";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 
@@ -251,7 +252,9 @@ export function Settings({
  *  so settings read as a classic two-column preference sheet. */
 function SettingsSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <section className="grid gap-3.5 border-t border-border pt-[30px] @3xl:grid-cols-[200px_minmax(0,1fr)] @3xl:gap-x-12">
+    <section
+      className={`grid gap-3.5 ${SECTION_HAIRLINE} @3xl:grid-cols-[200px_minmax(0,1fr)] @3xl:gap-x-12`}
+    >
       <Label className="@3xl:pt-1">{label}</Label>
       <div className="flex min-w-0 flex-col gap-3.5">{children}</div>
     </section>

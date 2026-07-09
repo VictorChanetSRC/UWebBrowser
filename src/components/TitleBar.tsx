@@ -218,7 +218,7 @@ function TitleBarImpl({
               className={cn(
                 "tab group relative flex h-8 min-w-0 flex-none animate-tab-in cursor-default items-center gap-2 rounded-lg pl-2.5 pr-1.5 transition-[width,background-color,color] duration-[130ms] ease-brand",
                 active ? "bg-ink-800 text-ink-100" : "text-ink-400 hover:bg-ink-900 hover:text-ink-200",
-                dragging && "z-10 shadow-lg shadow-black/40 transition-[background-color,color]",
+                dragging && "z-10 shadow-strip transition-[background-color,color]",
               )}
               onPointerDown={(e) => beginDrag(e, tab, index)}
               onPointerMove={moveDrag}

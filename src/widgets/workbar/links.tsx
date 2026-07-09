@@ -37,7 +37,7 @@ function LinksBody({ widget, onOpen }: BarBodyProps<LinksWidget>) {
             url={item.url}
             className="size-[15px] rounded-[3px] opacity-70 grayscale transition-[filter,opacity] duration-[130ms] ease-brand group-hover:opacity-100 group-hover:grayscale-0"
           />
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+          <span className="truncate">
             {domainOf(item.url)}
           </span>
         </button>
@@ -69,10 +69,10 @@ function LinksEditor({ widget, onPatch }: BarEditorProps<LinksWidget>) {
           key={item.url}
           className="group flex min-w-0 items-center gap-2 rounded-[7px] px-1.5 py-1 transition-[background-color] duration-[130ms] ease-brand hover:bg-ink-800"
         >
-          <span className="min-w-0 flex-none overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] text-ink-200">
+          <span className="min-w-0 flex-none truncate text-[12.5px] text-ink-200">
             {item.name}
           </span>
-          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] text-ink-500">
+          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-ink-500">
             {hostOf(item.url)}
           </span>
           <Button

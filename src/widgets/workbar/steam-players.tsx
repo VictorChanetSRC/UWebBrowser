@@ -7,6 +7,7 @@ import { playerHistory, recordPlayers, type PlayerSample } from "@/lib/steam-pla
 import { usePolled } from "@/hooks/use-polled";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Trace } from "@/components/ui/sparkline";
 import { trackedGame, VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
 import { TracksGameEditor, WidgetCard, WidgetHint } from "./shared";
@@ -84,7 +85,7 @@ function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamP
           </div>
           <HourTrace samples={samples} now={data.at} />
           <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-400">
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+            <span className="truncate">
               {game.name || `App ${appid}`}
             </span>
             <span className="flex-none">past hour</span>
@@ -111,10 +112,6 @@ const HourTrace = memo(function HourTrace({
   const h = 32;
   const visible = samples.filter((s) => now - s.t <= HOUR_MS);
 
-  if (visible.length < 2) {
-    return <div className="h-8 w-full rounded-[4px] bg-ink-800/50" />;
-  }
-
   let min = Infinity;
   let max = -Infinity;
   for (const s of visible) {
@@ -127,29 +124,16 @@ const HourTrace = memo(function HourTrace({
   const lo = Math.max(0, min - pad);
   const hi = max + pad;
 
+  // x is wall clock within the hour; y spans the window's own min..max so
+  // small swings in a steady count stay visible.
   const points = visible.map((s) => {
     const x = ((s.t - (now - HOUR_MS)) / HOUR_MS) * w;
     // Inset 1px top/bottom so the stroke isn't clipped at the extremes.
     const y = h - 1 - ((s.players - lo) / (hi - lo)) * (h - 2);
     return [x, y] as const;
   });
-  const line = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const area = `${points[0][0].toFixed(1)},${h} ${line} ${points[points.length - 1][0].toFixed(1)},${h}`;
 
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-8 w-full" aria-hidden>
-      <polygon points={area} className="fill-ink-800" />
-      <polyline
-        points={line}
-        fill="none"
-        strokeWidth={1.5}
-        vectorEffect="non-scaling-stroke"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        className="stroke-ink-400"
-      />
-    </svg>
-  );
+  return <Trace points={points} width={w} height={h} className="h-8" />;
 });
 
 export default defineBarWidget<SteamPlayersWidget>({

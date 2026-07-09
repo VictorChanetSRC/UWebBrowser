@@ -1,6 +1,6 @@
 import type { Game } from "./config";
 import { loadJson, saveJson } from "./storage";
-import { moveBy, moveTo, patchById, removeById } from "./list-ops";
+import { moveBy, moveTo, patchById, removeById, uid } from "./list-ops";
 import {
   DASH_WIDGET_TYPES,
   defaultTileSpan,
@@ -35,8 +35,6 @@ export {
 type GameWidget = Extract<DashWidget, { type: "game" }>;
 
 const KEY = "uwb.dashboard";
-
-const uid = () => crypto.randomUUID();
 
 /** Boards saved before free spans stored one of four size letters. */
 const LEGACY_SIZES: Record<string, TileSpan> = {
