@@ -2,9 +2,11 @@ import type { Game } from "@/lib/config";
 import { createWidgetRegistry } from "../registry";
 import type { DashBodyProps, DashConfigProps, DashWidgetSpec, TileSpan } from "./define";
 import game, { type GameWidget } from "./game";
+import revenue, { type RevenueWidget } from "./revenue";
 import build, { type BuildWidget } from "./build";
 import buzz, { type BuzzWidget } from "./buzz";
 import itch, { type ItchWidget } from "./itch";
+import itchRevenue, { type ItchRevenueWidget } from "./itch-revenue";
 import news, { type NewsWidget } from "./news";
 import steamList, { type SteamListWidget } from "./steam-list";
 import epicFree, { type EpicFreeWidget } from "./epic-free";
@@ -21,9 +23,11 @@ import github, { type GithubWidget } from "./github";
 
 export type DashWidget =
   | GameWidget
+  | RevenueWidget
   | BuildWidget
   | BuzzWidget
   | ItchWidget
+  | ItchRevenueWidget
   | NewsWidget
   | SteamListWidget
   | EpicFreeWidget
@@ -39,9 +43,11 @@ export type DashWidgetType = DashWidget["type"];
  */
 export const DASH_WIDGETS: readonly DashWidgetSpec<any>[] = [
   game,
+  revenue,
   build,
   buzz,
   itch,
+  itchRevenue,
   news,
   steamList,
   epicFree,

@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { newGame, type Game, type UwbConfig } from "../lib/config";
 import { PLATFORMS } from "../lib/platforms";
+import { ipc, type SalesStatus } from "@/lib/ipc";
+import { ago } from "@/lib/format";
 import { usePlatformCheck } from "@/hooks/use-platform-check";
 import { GameFinder, SetupHero } from "./GameFinder";
 import { PlatformCheckList, Spinner } from "./PlatformCheckList";
@@ -117,6 +119,8 @@ export function Setup({
           />
           <Hint>Stays on this machine. Pulls views, downloads and purchases for all your games.</Hint>
         </label>
+
+        <SteamworksField />
 
         <div className="flex gap-2.5 pt-1">
           <Button
@@ -240,6 +244,86 @@ function GameRow({
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * Connect the Steamworks publisher key that unlocks the revenue widgets.
+ *
+ * Unlike every other field on this page, this one doesn't live in the draft:
+ * the key goes straight to the OS credential store and never comes back, so
+ * there is nothing to save and nothing to show. Connect and Disconnect apply
+ * the moment they're pressed.
+ */
+function SteamworksField() {
+  const [status, setStatus] = useState<SalesStatus | null>(null);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    ipc.steamSalesStatus().then(setStatus).catch(() => setStatus(null));
+  }, []);
+
+  const run = async (action: () => Promise<SalesStatus>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await action());
+      setKey("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (status?.connected) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Label>Steamworks · connected</Label>
+        <Card className="flex-row items-center justify-between gap-3 p-3.5">
+          <span className="text-[13px] text-ink-300">
+            {status.lastSyncedAt
+              ? `Sales synced ${ago(status.lastSyncedAt)}`
+              : "Waiting for the first sync"}
+          </span>
+          <Button onClick={() => run(ipc.steamSalesDisconnect)} disabled={busy}>
+            Disconnect
+          </Button>
+        </Card>
+        {error && <small className="text-xs text-ink-300">{error}</small>}
+        <Hint>Disconnecting forgets the key and deletes the sales history it collected.</Hint>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Steamworks publisher key · optional</Label>
+      <div className="flex gap-2">
+        <Input
+          value={key}
+          type="password"
+          spellCheck={false}
+          placeholder="from Steamworks → Users &amp; Permissions"
+          onChange={(e) => setKey(e.target.value.trim())}
+        />
+        <Button
+          className="flex-none min-w-[108px]"
+          onClick={() => run(() => ipc.steamSalesConnect(key))}
+          disabled={!key || busy}
+        >
+          {busy ? "Checking…" : "Connect"}
+        </Button>
+      </div>
+      {error && <small className="text-xs text-ink-300">{error}</small>}
+      <Hint>
+        Unlocks the Revenue widgets. Create the key under Manage Groups with the Sales Data
+        permission, in a group of its own. It goes to the Windows Credential Manager, never to
+        the browser.
+      </Hint>
+    </div>
   );
 }
 

@@ -85,3 +85,58 @@ export function usd(cents: number): string {
   const dollars = cents / 100;
   return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
 }
+
+/** USD *dollars* to "$1,240" / "$12.34" — what the sales ledger deals in.
+ *  Cents only survive below $100, where they're the difference between one
+ *  sale and none; above it they're noise on a figure that moves in tens. */
+export function fmtUsd(dollars: number | null | undefined): string {
+  if (dollars == null || Number.isNaN(dollars)) return MISSING;
+  const digits = Math.abs(dollars) < 100 ? 2 : 0;
+  return dollars.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+/** Minor units to money in any currency — "$50.47", "€1,204". itch quotes
+ *  earnings in cents and not always in dollars, so the code travels with the
+ *  number. An unknown code falls back rather than throwing on Intl. */
+export function fmtCents(
+  cents: number | null | undefined,
+  currency: string = "USD",
+): string {
+  if (cents == null || Number.isNaN(cents)) return MISSING;
+  const value = cents / 100;
+  const digits = Math.abs(value) < 100 ? 2 : 0;
+  const options = {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  } as const;
+  try {
+    return value.toLocaleString("en-US", { style: "currency", currency, ...options });
+  } catch {
+    return `${value.toLocaleString("en-US", options)} ${currency}`;
+  }
+}
+
+/** Signed percent change, "+18%" / "-4%", or {@link MISSING} against a zero
+ *  base — a jump from nothing has no percentage, only a story. */
+export function fmtChange(current: number, previous: number): string {
+  if (!previous) return MISSING;
+  const pct = Math.round(((current - previous) / Math.abs(previous)) * 100);
+  return `${pct > 0 ? "+" : ""}${pct}%`;
+}
+
+/** "Jul 9" for a bare `YYYY-MM-DD`. Parsed field by field: `new Date(iso)`
+ *  reads it as UTC midnight, which renders as the day before west of
+ *  Greenwich — and every date here is already a calendar day, not an instant. */
+export function fmtDay(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}

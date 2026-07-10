@@ -41,6 +41,9 @@ sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+# The Steamworks publisher key is a financial credential; it goes in the
+# Windows Credential Manager, never in localStorage. See src/sales.rs.
+keyring = { version = "3", features = ["windows-native"] }
 # WebView2 native browser-extension APIs (AddBrowserExtension /
 # GetBrowserExtensions on ICoreWebView2Profile7). Versions match what
 # tauri/wry already pull in, so no second copy is compiled.

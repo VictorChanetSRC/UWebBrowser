@@ -2,9 +2,11 @@ import { createWidgetRegistry } from "../registry";
 import type { BarBodyProps, BarEditorProps, BarWidgetSpec } from "./define";
 import steamGame, { type SteamGameWidget } from "./steam-game";
 import steamPlayers, { type SteamPlayersWidget } from "./steam-players";
+import revenue, { type RevenueWidget } from "./revenue";
 import build, { type BuildWidget } from "./build";
 import system, { type SystemWidget } from "./system";
 import itch, { type ItchWidget } from "./itch";
+import itchRevenue, { type ItchRevenueWidget } from "./itch-revenue";
 import links, { type LinksWidget } from "./links";
 
 /**
@@ -19,9 +21,11 @@ export type Widget =
   | LinksWidget
   | SteamGameWidget
   | SteamPlayersWidget
+  | RevenueWidget
   | BuildWidget
   | SystemWidget
-  | ItchWidget;
+  | ItchWidget
+  | ItchRevenueWidget;
 
 export type WidgetType = Widget["type"];
 
@@ -33,8 +37,10 @@ export type WidgetType = Widget["type"];
 export const BAR_WIDGETS: readonly BarWidgetSpec<any>[] = [
   steamGame,
   steamPlayers,
+  revenue,
   build,
   itch,
+  itchRevenue,
   system,
   links,
 ];

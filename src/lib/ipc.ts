@@ -143,6 +143,18 @@ export const ipc = {
     coalesce(`reddit:${query}`, () => invoke<RedditPost[]>("reddit_search", { query })),
   itchGames: (apiKey: string) =>
     coalesce(`itch:${apiKey}`, () => invoke<ItchGame[]>("itch_games", { apiKey })),
+  /** Lifetime earnings from itch, plus the daily history we measure ourselves. */
+  itchEarnings: (apiKey: string) =>
+    coalesce(`itch-earnings:${apiKey}`, () => invoke<ItchEarnings>("itch_earnings", { apiKey })),
+  /** Whether a Steamworks publisher key is on file. Never returns the key. */
+  steamSalesStatus: () => invoke<SalesStatus>("steam_sales_status"),
+  /** Store the publisher key in the OS credential store, after proving it works. */
+  steamSalesConnect: (key: string) => invoke<SalesStatus>("steam_sales_connect", { key }),
+  /** Forget the key and delete the ledger it filled. */
+  steamSalesDisconnect: () => invoke<SalesStatus>("steam_sales_disconnect"),
+  /** One game's sales from the local ledger; the backend resyncs when stale. */
+  steamSalesSummary: (appid: string) =>
+    coalesce(`sales:${appid}`, () => invoke<SalesSummary>("steam_sales_summary", { appid })),
   fetchFeed: (url: string) =>
     coalesce(`feed:${url}`, () => invoke<FeedItem[]>("fetch_feed", { url })),
   steamFeatured: (category: string) =>
@@ -222,6 +234,55 @@ export type SteamStats = {
   players: number | null;
 };
 
+/** Steamworks connection state. The publisher key itself never crosses this
+ *  boundary — it lives in the OS credential store and is read only by Rust. */
+export type SalesStatus = {
+  connected: boolean;
+  /** Unix seconds of the last successful sync; 0 when never synced. */
+  lastSyncedAt: number;
+  syncing: boolean;
+};
+
+/** One Pacific day of sales for one app. `netUsd` is gross less returns and
+ *  tax, and still *before* Valve's revenue split. */
+export type SalesDay = {
+  /** `YYYY-MM-DD`, Pacific — a calendar day, not an instant. */
+  date: string;
+  netUsd: number;
+  grossUsd: number;
+  units: number;
+};
+
+/** A rolling total over `days` days ending on the newest day on file. */
+export type SalesWindow = {
+  netUsd: number;
+  grossUsd: number;
+  units: number;
+  days: number;
+};
+
+/**
+ * One game's sales, summarised from the local ledger. Every window is anchored
+ * on `latest` — the newest day Steam has settled — rather than on the wall
+ * clock, because Valve reports in Pacific days and recalculates them for a
+ * while afterwards. There is no realtime revenue feed to ask for.
+ */
+export type SalesSummary = {
+  connected: boolean;
+  hasData: boolean;
+  lastSyncedAt: number;
+  syncing: boolean;
+  latest?: SalesDay | null;
+  /** The day before `latest`, when we have it; a gap leaves this null. */
+  previous?: SalesDay | null;
+  last7?: SalesWindow;
+  last30?: SalesWindow;
+  monthToDate?: SalesWindow;
+  /** 30 daily net-sales figures, oldest first, zero-filled across gaps. */
+  spark?: number[];
+  topCountry?: { code: string; netUsd: number } | null;
+};
+
 /** One search hit from Reddit's RSS mirror; vote/comment counts aren't in
  *  the feed, and some URLs live outside a subreddit. */
 export type RedditPost = {
@@ -287,6 +348,34 @@ export type ItchGame = {
   downloads_count: number;
   purchases_count: number;
   published: boolean;
+  /** Cumulative lifetime earnings, one entry per currency the game has earned
+   *  in. `amount` is minor units (cents). itch reports no history, only this
+   *  running total — see ItchEarnings for where the daily figures come from. */
+  earnings?: { currency: string; amount: number; amount_formatted: string }[];
+};
+
+/**
+ * itch.io earnings. `lifetimeCents` comes straight from itch; every other
+ * figure is measured locally, by diffing that running total between polls,
+ * because itch exposes no purchase feed and no time series. History therefore
+ * begins at `trackingSince` and cannot be backfilled.
+ *
+ * Figures are in `currency` — the account's dominant one. Other currencies are
+ * counted in `currencies` but never summed in: 100 JPY is not 100 USD.
+ */
+export type ItchEarnings = {
+  hasData: boolean;
+  currency?: string;
+  /** How many currencies the account has earned in, dominant one included. */
+  currencies: number;
+  lifetimeCents?: number;
+  todayCents?: number;
+  last7Cents?: number;
+  last30Cents?: number;
+  /** 30 daily figures in minor units, oldest first, zero-filled across gaps. */
+  spark?: number[];
+  /** Unix seconds of our first snapshot; 0 before we've ever reached itch. */
+  trackingSince: number;
 };
 
 export type EngineInstall = {

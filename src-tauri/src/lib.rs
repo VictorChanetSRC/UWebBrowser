@@ -6,7 +6,9 @@ mod extensions;
 mod github;
 mod history;
 mod http;
+mod itch;
 mod news;
+mod sales;
 mod stats;
 mod sysmon;
 mod tabs;
@@ -88,7 +90,12 @@ pub fn run() {
             stats::steam_stats,
             stats::steam_players,
             stats::reddit_search,
-            stats::itch_games,
+            itch::itch_games,
+            itch::itch_earnings,
+            sales::steam_sales_status,
+            sales::steam_sales_connect,
+            sales::steam_sales_disconnect,
+            sales::steam_sales_summary,
             github::github_repo_stats,
             github::github_releases,
             news::fetch_feed,

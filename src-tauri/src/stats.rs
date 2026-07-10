@@ -14,7 +14,6 @@ static STEAM_PLAYERS: LazyLock<TtlCache<Value>> =
     LazyLock::new(|| TtlCache::new(Duration::from_secs(20)));
 static REDDIT: LazyLock<TtlCache<Value>> =
     LazyLock::new(|| TtlCache::new(Duration::from_secs(300)));
-static ITCH: LazyLock<TtlCache<Value>> = LazyLock::new(|| TtlCache::new(Duration::from_secs(300)));
 
 /// Live Steam numbers for a game. All three endpoints are public, no API key.
 #[tauri::command]
@@ -125,44 +124,4 @@ mod tests {
         assert_eq!(subreddit_of("https://www.reddit.com/user/someone/comments/x/"), None);
         assert_eq!(subreddit_of("https://www.reddit.com/r/"), None);
     }
-}
-
-/// The developer's games on itch.io, including views/downloads/purchases.
-/// Needs an itch.io API key (Settings -> API keys).
-#[tauri::command]
-pub async fn itch_games(api_key: String) -> Result<Value, String> {
-    let api_key = api_key.trim().to_string();
-    if api_key.is_empty() {
-        return Err("missing itch.io API key".into());
-    }
-    let key = api_key.clone();
-    get_or_fetch(&ITCH, &key, async move {
-        let client = http::shared()?;
-        // The key lands in the URL path; encode it so a stray character can't
-        // break out of the segment.
-        let response = get_json(
-            client,
-            &format!(
-                "https://itch.io/api/1/{}/my-games",
-                urlencoding::encode(&api_key)
-            ),
-        )
-        .await?;
-
-        if let Some(errors) = response["errors"].as_array() {
-            let message = errors
-                .iter()
-                .filter_map(|e| e.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(if message.is_empty() {
-                "itch.io rejected the request".into()
-            } else {
-                message
-            });
-        }
-
-        Ok(response["games"].clone())
-    })
-    .await
 }

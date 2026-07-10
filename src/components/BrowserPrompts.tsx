@@ -2,14 +2,22 @@ import { useState } from "react";
 import {
   Bell,
   Camera,
+  CircleAlert,
   Clipboard,
   ExternalLink,
+  KeyRound,
   Lock,
   MapPin,
   Mic,
+  SearchX,
+  ServerCrash,
+  ServerOff,
   ShieldAlert,
+  TimerOff,
+  Unplug,
   WifiOff,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusPage } from "@/components/ui/status-page";
@@ -220,35 +228,141 @@ export function CertInterstitial({
   );
 }
 
-/** Human summary for a WebView2 WebErrorStatus code. Only the codes users
- *  actually hit are named; the rest fall back to a generic line. */
-const ERROR_COPY: Record<number, { title: string; detail: string }> = {
-  // COREWEBVIEW2_WEB_ERROR_STATUS ordinals, per webview2-com-sys bindings.rs.
-  // Cert statuses (1-5) normally surface as a `cert-error` interstitial instead;
-  // they only land here when the navigation failed outright.
-  1: { title: "Your connection isn’t private", detail: "The certificate is for a different site." },
-  2: { title: "Your connection isn’t private", detail: "The site’s certificate has expired." },
-  3: { title: "Your connection isn’t private", detail: "The client certificate has errors." },
-  4: { title: "Your connection isn’t private", detail: "The site’s certificate was revoked." },
-  5: { title: "Your connection isn’t private", detail: "The site’s certificate is invalid." },
-  6: {
-    title: "This site can’t be reached",
-    detail: "The server refused the connection or is unreachable.",
-  },
-  7: { title: "This site can’t be reached", detail: "The server took too long to respond." },
-  8: { title: "This site can’t be reached", detail: "The server sent an invalid response." },
-  9: { title: "This site can’t be reached", detail: "The connection was interrupted." },
-  10: { title: "This site can’t be reached", detail: "The connection was reset." },
-  11: { title: "You’re offline", detail: "Check your network connection and try again." },
-  12: { title: "This site can’t be reached", detail: "The connection could not be established." },
-  13: {
-    title: "This site can’t be reached",
-    detail: "Its server IP address could not be found (DNS).",
-  },
-  15: { title: "This site can’t be reached", detail: "The redirect failed." },
+type ErrorCopy = {
+  /** The COREWEBVIEW2_WEB_ERROR_STATUS enumerator, minus its long prefix. We
+   *  surface the engine's own name rather than a guessed Chrome `ERR_` code, so
+   *  what the page shows is exactly what the navigation actually reported. */
+  name: string;
+  title: string;
+  detail: string;
+  hint?: string;
+  icon: LucideIcon;
 };
 
-/** Branded network-error page shown when a main-frame navigation fails. */
+/** Every WebErrorStatus a main-frame navigation can fail with, named. Status 14
+ *  (OPERATION_CANCELED) is filtered out in webext.rs — a stop or an external
+ *  protocol handoff isn't a failure. Cert statuses (1-5) normally surface as a
+ *  `cert-error` interstitial and only land here when the load failed outright. */
+const ERROR_COPY: Record<number, ErrorCopy> = {
+  0: {
+    name: "UNKNOWN",
+    title: "The page didn’t load",
+    detail: "The engine stopped the navigation without reporting a reason.",
+    hint: "An extension or a security policy may have blocked it.",
+    icon: CircleAlert,
+  },
+  1: {
+    name: "CERTIFICATE_COMMON_NAME_IS_INCORRECT",
+    title: "Your connection isn’t private",
+    detail: "The certificate this site presented was issued for a different domain.",
+    icon: ShieldAlert,
+  },
+  2: {
+    name: "CERTIFICATE_EXPIRED",
+    title: "Your connection isn’t private",
+    detail: "The site’s certificate has expired.",
+    hint: "If your computer’s clock is wrong, valid certificates look expired.",
+    icon: ShieldAlert,
+  },
+  3: {
+    name: "CLIENT_CERTIFICATE_CONTAINS_ERRORS",
+    title: "Your connection isn’t private",
+    detail: "The client certificate sent to this site was rejected as invalid.",
+    icon: ShieldAlert,
+  },
+  4: {
+    name: "CERTIFICATE_REVOKED",
+    title: "Your connection isn’t private",
+    detail: "The site’s certificate was revoked by the authority that issued it.",
+    icon: ShieldAlert,
+  },
+  5: {
+    name: "CERTIFICATE_IS_INVALID",
+    title: "Your connection isn’t private",
+    detail: "The site’s certificate is malformed or signed by an untrusted authority.",
+    icon: ShieldAlert,
+  },
+  6: {
+    name: "SERVER_UNREACHABLE",
+    title: "This server is unreachable",
+    detail: "The address resolved, but no route to the server exists from this network.",
+    hint: "A VPN, firewall or proxy is the usual cause.",
+    icon: ServerOff,
+  },
+  7: {
+    name: "TIMEOUT",
+    title: "This site took too long to respond",
+    detail: "The server accepted the connection but never sent a response.",
+    icon: TimerOff,
+  },
+  8: {
+    name: "ERROR_HTTP_INVALID_SERVER_RESPONSE",
+    title: "The server sent an invalid response",
+    detail: "The reply wasn’t valid HTTP, so it couldn’t be parsed.",
+    icon: ServerCrash,
+  },
+  9: {
+    name: "CONNECTION_ABORTED",
+    title: "The connection was interrupted",
+    detail: "The transfer stopped partway through, before the page finished loading.",
+    icon: Unplug,
+  },
+  10: {
+    name: "CONNECTION_RESET",
+    title: "The connection was reset",
+    detail: "The server closed the connection abruptly.",
+    icon: Unplug,
+  },
+  11: {
+    name: "DISCONNECTED",
+    title: "You’re offline",
+    detail: "This computer has no working network connection.",
+    hint: "Check your Wi-Fi or cable, then reload.",
+    icon: WifiOff,
+  },
+  12: {
+    name: "CANNOT_CONNECT",
+    title: "This site refused to connect",
+    detail: "The server was found but rejected the connection on that port.",
+    hint: "It may be down, or listening on a different port.",
+    icon: ServerOff,
+  },
+  13: {
+    name: "HOST_NAME_NOT_RESOLVED",
+    title: "This site’s address couldn’t be found",
+    detail: "DNS has no IP address for this hostname.",
+    hint: "Check the address for a typo.",
+    icon: SearchX,
+  },
+  15: {
+    name: "REDIRECT_FAILED",
+    title: "This page has a redirect problem",
+    detail: "The site redirected in a loop, or to somewhere that couldn’t be loaded.",
+    icon: CircleAlert,
+  },
+  16: {
+    name: "UNEXPECTED_ERROR",
+    title: "Something went wrong loading this page",
+    detail: "The engine hit an internal error it couldn’t classify.",
+    icon: CircleAlert,
+  },
+  17: {
+    name: "VALID_AUTHENTICATION_CREDENTIALS_REQUIRED",
+    title: "This page needs a sign-in",
+    detail: "The server rejected the credentials it was given.",
+    icon: KeyRound,
+  },
+  18: {
+    name: "VALID_PROXY_AUTHENTICATION_REQUIRED",
+    title: "Your proxy needs a sign-in",
+    detail: "The proxy between you and this site rejected the credentials it was given.",
+    icon: KeyRound,
+  },
+};
+
+/** Branded network-error page shown when a main-frame navigation fails. Names
+ *  the exact failure — Chrome's blanket "site can't be reached" tells a user
+ *  nothing about whether to fix a typo, a proxy, or their Wi-Fi. */
 export function NavErrorPage({
   code,
   url,
@@ -258,22 +372,24 @@ export function NavErrorPage({
   url: string;
   onReload: () => void;
 }) {
-  const copy = ERROR_COPY[code] ?? {
-    title: "This site can’t be reached",
-    detail: "Something went wrong loading the page.",
-  };
+  const copy = ERROR_COPY[code];
+  const Icon = copy?.icon ?? CircleAlert;
   return (
     <StatusPage
-      icon={<WifiOff className="size-10 text-ink-500" aria-hidden />}
-      title={copy.title}
+      icon={<Icon className="size-10 text-ink-500" aria-hidden />}
+      title={copy?.title ?? "This page didn’t load"}
       actions={
         <Button variant="outline" onClick={onReload}>
           Reload
         </Button>
       }
     >
-      {copy.detail}
-      <div className="mt-1 break-all text-[11.5px] text-ink-500">{hostOf(url) || url}</div>
+      {copy?.detail ?? "The navigation failed with an error this build doesn’t recognise."}
+      {copy?.hint && <div className="mt-1 text-ink-500">{copy.hint}</div>}
+      <div className="mt-3 break-all text-[11.5px] text-ink-500">{url}</div>
+      <div className="mt-1 font-mono text-[11.5px] uppercase tracking-wide text-ink-500">
+        {copy ? `${copy.name} · ${code}` : `WEB_ERROR_STATUS · ${code}`}
+      </div>
     </StatusPage>
   );
 }
