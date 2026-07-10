@@ -1,13 +1,11 @@
 import { Gamepad2 } from "lucide-react";
-import { ipc } from "@/lib/ipc";
 import { PLATFORMS } from "@/lib/platforms";
-import { fmtNumber, MISSING, sourceError } from "@/lib/format";
+import { fmtNumber, MISSING } from "@/lib/format";
 import { positivePct, priceLabel, releaseLabel } from "@/lib/steam";
 import { jobRunning } from "@/lib/build-job";
-import { usePolled } from "@/hooks/use-polled";
 import { useBuildJob } from "@/hooks/use-build-job";
+import { useSteamStats } from "../data";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
 import {
@@ -15,6 +13,7 @@ import {
   DataCard,
   Stat,
   StatGrid,
+  StatGridSkeleton,
   TileHint,
   TracksGameConfig,
   trackedAppId,
@@ -33,13 +32,8 @@ export type GameWidget = {
 function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<GameWidget>) {
   const game = trackedGame(widget.gameId, games);
   const appid = trackedAppId(widget.gameId, games);
-  const { data: stats, error } = usePolled(
-    () => ipc.steamStats(appid),
-    [appid],
-    60_000,
-    !!appid && active,
-    `game:${appid}`,
-  );
+  // Fresher than the rail's copy: this tile is the one the user is looking at.
+  const { data: stats, error } = useSteamStats(appid, active, 60_000);
 
   // A build in flight owns the one Signal pulse; mute the players dot to match.
   const job = useBuildJob();
@@ -63,15 +57,10 @@ function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<
   return (
     <DataCard
       label="Your game"
-      error={!!appid && !stats && error ? sourceError("Steam", error) : null}
+      source="Steam"
+      error={error}
       loading={!!appid && !stats}
-      skeleton={
-        <StatGrid>
-          {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-[78px]" />
-          ))}
-        </StatGrid>
-      }
+      skeleton={<StatGridSkeleton count={6} />}
       links={
         appid ? (
           <>

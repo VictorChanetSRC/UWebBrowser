@@ -43,6 +43,7 @@ import { elapsedSince, fmtNumber, formatDuration, gb, MISSING } from "@/lib/form
 import { copyText } from "@/lib/url";
 import { DashSection, Stat, StatGrid } from "./Dashboard";
 import { Button } from "@/components/ui/button";
+import { ChipGroup } from "@/components/ui/chip-group";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
@@ -335,19 +336,15 @@ function BuildSection({
         <EmptyState>Link a project above to start building.</EmptyState>
       ) : (
         <>
-          <ChipRow label="Project">
-            {projects.map((p) => (
-              <Button
-                key={p.id}
-                variant="chip"
-                size="chip"
-                aria-pressed={p.id === project?.id}
-                onClick={() => setProjectId(p.id)}
-              >
-                {p.name}
-              </Button>
-            ))}
-          </ChipRow>
+          <ChipRow
+            label="Project"
+            options={projects.map((p) => ({ key: p.id, label: p.name }))}
+            value={project?.id ?? null}
+            onPick={setProjectId}
+          />
+          {/* Action stays hand-rolled: its chips carry a per-option `disabled`
+              and tooltip for Blueprint-only projects, which ChipGroup doesn't
+              model. */}
           <ChipRow label="Action">
             {ACTIONS.map((a) => (
               <Button
@@ -367,33 +364,19 @@ function BuildSection({
               </Button>
             ))}
           </ChipRow>
-          <ChipRow label="Config">
-            {CONFIGS.map((c) => (
-              <Button
-                key={c}
-                variant="chip"
-                size="chip"
-                aria-pressed={c === config}
-                onClick={() => setConfig(c)}
-              >
-                {c}
-              </Button>
-            ))}
-          </ChipRow>
+          <ChipRow
+            label="Config"
+            options={CONFIGS.map((c) => ({ key: c, label: c }))}
+            value={config}
+            onPick={setConfig}
+          />
           {action !== "build" && (
-            <ChipRow label="Platform">
-              {PLATFORMS.map((p) => (
-                <Button
-                  key={p}
-                  variant="chip"
-                  size="chip"
-                  aria-pressed={p === platform}
-                  onClick={() => setPlatform(p)}
-                >
-                  {p}
-                </Button>
-              ))}
-            </ChipRow>
+            <ChipRow
+              label="Platform"
+              options={PLATFORMS.map((p) => ({ key: p, label: p }))}
+              value={platform}
+              onPick={setPlatform}
+            />
           )}
           <div className="flex items-center gap-4 pt-1">
             <Button variant="primary" onClick={run} disabled={!engine || running}>
@@ -1036,11 +1019,31 @@ function RemoveButton({ label, onClick }: { label: string; onClick: () => void }
   );
 }
 
-function ChipRow({ label, children }: { label: string; children: ReactNode }) {
+/** A labelled row of chips. Takes `children` for the one row that needs per-chip
+ *  `disabled`/`title` (Action, for Blueprint-only projects); everything else
+ *  passes `options`/`value`/`onPick` straight through to {@link ChipGroup}. */
+function ChipRow<T extends string>({
+  label,
+  children,
+  ...group
+}: {
+  label: string;
+  children?: ReactNode;
+} & Partial<{
+  options: readonly { key: T; label: string }[];
+  value: T | null;
+  onPick: (key: T) => void;
+}>) {
   return (
     <div className="flex items-center gap-2.5">
-      <Label size="micro" className="w-[72px] flex-none">{label}</Label>
-      <div className="flex flex-wrap gap-2">{children}</div>
+      <Label size="micro" className="w-[72px] flex-none">
+        {label}
+      </Label>
+      {group.options ? (
+        <ChipGroup options={group.options} value={group.value ?? null} onPick={group.onPick!} />
+      ) : (
+        <div className="flex flex-wrap gap-2">{children}</div>
+      )}
     </div>
   );
 }

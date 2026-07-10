@@ -29,6 +29,61 @@ pub fn install_tab_hooks(app: &AppHandle, webview: &Webview, id: &str) {
 #[cfg(not(windows))]
 pub fn install_tab_hooks(_app: &AppHandle, _webview: &Webview, _id: &str) {}
 
+/// A session-history or load-control action, driven through WebView2's own
+/// navigation API rather than injected JavaScript.
+///
+/// This distinction is not cosmetic. `history.back()` / `location.reload()` /
+/// `window.stop()` all run *inside* the page, so they die exactly when the user
+/// needs them: a page whose script is hung can't execute them at all, and
+/// `window.stop()` cannot abort a main-frame navigation that hasn't committed a
+/// document yet — which is the only time anyone presses Stop.
+#[derive(Clone, Copy)]
+pub enum NavAction {
+    Back,
+    Forward,
+    /// Ordinary reload; revalidates against the HTTP cache.
+    Reload,
+    /// Cache-bypassing reload (Ctrl+Shift+R). Issued over CDP because
+    /// `ICoreWebView2::Reload` has no ignore-cache flag.
+    HardReload,
+    Stop,
+}
+
+/// Drive `action` natively. Returns false when there's no native path (non-
+/// Windows), so the caller can fall back to injected script.
+#[cfg(windows)]
+pub fn navigate(webview: &Webview, action: NavAction) -> bool {
+    webview
+        .with_webview(move |pw| unsafe { imp::navigate(&pw, action) })
+        .is_ok()
+}
+
+#[cfg(not(windows))]
+pub fn navigate(_webview: &Webview, _action: NavAction) -> bool {
+    false
+}
+
+/// Evaluate `script` in the page's main frame and return its boolean result, or
+/// `None` when we can't get an answer (no CDP, old runtime, timeout).
+///
+/// `Webview::eval` is fire-and-forget, so nothing in the app could ever read a
+/// script's value. Going through the DevTools protocol's `Runtime.evaluate` —
+/// the same channel `resolve_target_id` already uses — gives us one, which is
+/// what lets the find bar say whether a query matched anything.
+#[cfg(windows)]
+pub fn eval_bool(webview: &Webview, script: &str) -> Option<bool> {
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel::<bool>();
+    let script = script.to_string();
+    let _ = webview.with_webview(move |pw| unsafe { imp::eval_bool(&pw, &script, tx) });
+    rx.recv_timeout(std::time::Duration::from_secs(2)).ok()
+}
+
+#[cfg(not(windows))]
+pub fn eval_bool(_webview: &Webview, _script: &str) -> Option<bool> {
+    None
+}
+
 /// Set the zoom factor (1.0 == 100%) on a tab webview's controller.
 #[cfg(windows)]
 pub fn set_zoom(webview: &Webview, factor: f64) {
@@ -174,13 +229,19 @@ pub fn print(_webview: &Webview) {}
 
 /// Resolve a pending permission prompt. The COM args have UI-thread affinity,
 /// so the answer is marshaled onto the main thread (commands run on a worker).
+///
+/// `decision` is `"allow"`, `"block"` or `"dismiss"`. Allow and block are
+/// *remembered* by WebView2 for that origin; dismiss sets the state back to
+/// DEFAULT, which denies this one request without recording a preference. That
+/// distinction is what makes Escape and a scrim click safe to offer: closing a
+/// prompt must never silently blacklist the site's camera forever.
 #[cfg(windows)]
-pub fn permission_respond(app: &AppHandle, id: String, allow: bool) {
-    let _ = app.run_on_main_thread(move || imp::permission_respond(&id, allow));
+pub fn permission_respond(app: &AppHandle, id: String, decision: String) {
+    let _ = app.run_on_main_thread(move || imp::permission_respond(&id, &decision));
 }
 
 #[cfg(not(windows))]
-pub fn permission_respond(_app: &AppHandle, _id: String, _allow: bool) {}
+pub fn permission_respond(_app: &AppHandle, _id: String, _decision: String) {}
 
 /// Resolve a pending HTTP basic-auth prompt with credentials, or cancel it.
 #[cfg(windows)]
@@ -217,6 +278,7 @@ mod imp {
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread::LocalKey;
     use tauri::webview::PlatformWebview;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Controller,
@@ -264,27 +326,42 @@ mod imp {
 
         /// Pending permission prompts (camera/mic/geo/notifications/clipboard),
         /// keyed by the id the chrome UI echoes back in `permission_respond`.
-        /// Value pairs the args (to set Allow/Deny) with the deferral (to
-        /// release the paused request). UI-thread only, like DOWNLOADS.
-        static PERMS: RefCell<
-            HashMap<String, (ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2Deferral)>,
-        > = RefCell::new(HashMap::new());
+        static PERMS: Pending<ICoreWebView2PermissionRequestedEventArgs> =
+            RefCell::new(HashMap::new());
 
         /// Pending HTTP basic-auth challenges, keyed like PERMS.
-        static AUTHS: RefCell<
-            HashMap<
-                String,
-                (ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Deferral),
-            >,
-        > = RefCell::new(HashMap::new());
+        static AUTHS: Pending<ICoreWebView2BasicAuthenticationRequestedEventArgs> =
+            RefCell::new(HashMap::new());
 
         /// Pending TLS certificate-error interstitials, keyed like PERMS.
-        static CERTS: RefCell<
-            HashMap<
-                String,
-                (ICoreWebView2ServerCertificateErrorDetectedEventArgs, ICoreWebView2Deferral),
-            >,
-        > = RefCell::new(HashMap::new());
+        static CERTS: Pending<ICoreWebView2ServerCertificateErrorDetectedEventArgs> =
+            RefCell::new(HashMap::new());
+    }
+
+    /// A registry of *paused* WebView2 requests: the event args (which carry the
+    /// answer) paired with the deferral that keeps the request suspended until
+    /// we set one. Thread-local because these COM objects have UI-thread
+    /// affinity and aren't `Send` — the commands marshal onto the main thread
+    /// via `run_on_main_thread` before touching them.
+    type Pending<A> = RefCell<HashMap<String, (A, ICoreWebView2Deferral)>>;
+
+    /// Park a request until the user answers it.
+    fn pause<A>(registry: &'static LocalKey<Pending<A>>, id: String, args: A, deferral: ICoreWebView2Deferral) {
+        registry.with(|m| m.borrow_mut().insert(id, (args, deferral)));
+    }
+
+    /// Take a paused request back out, let `answer` record the outcome on its
+    /// args, then release the deferral so the engine resumes. An unknown id
+    /// (already answered, or its tab closed underneath us) is a no-op.
+    fn resolve<A>(registry: &'static LocalKey<Pending<A>>, id: &str, answer: impl FnOnce(&A)) {
+        registry.with(|m| {
+            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
+                answer(&args);
+                unsafe {
+                    let _ = deferral.Complete();
+                }
+            }
+        });
     }
 
     /// Monotonic source of per-download ids (`dl1`, `dl2`, …). A counter, not a
@@ -300,6 +377,45 @@ mod imp {
     pub unsafe fn open_devtools(pw: &PlatformWebview) {
         if let Ok(core) = pw.controller().CoreWebView2() {
             let _ = core.OpenDevToolsWindow();
+        }
+    }
+
+    pub unsafe fn navigate(pw: &PlatformWebview, action: super::NavAction) {
+        use super::NavAction;
+        let Ok(core) = pw.controller().CoreWebView2() else {
+            return;
+        };
+        match action {
+            NavAction::Back => {
+                let _ = core.GoBack();
+            }
+            NavAction::Forward => {
+                let _ = core.GoForward();
+            }
+            NavAction::Reload => {
+                let _ = core.Reload();
+            }
+            NavAction::Stop => {
+                let _ = core.Stop();
+            }
+            NavAction::HardReload => {
+                let method = HSTRING::from("Page.reload");
+                let params = HSTRING::from(r#"{"ignoreCache":true}"#);
+                let handler =
+                    CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_hr, _r| Ok(())));
+                // Older runtimes (or a detached target) refuse the CDP call;
+                // a cached reload beats no reload at all.
+                if core
+                    .CallDevToolsProtocolMethod(
+                        PCWSTR(method.as_ptr()),
+                        PCWSTR(params.as_ptr()),
+                        &handler,
+                    )
+                    .is_err()
+                {
+                    let _ = core.Reload();
+                }
+            }
         }
     }
 
@@ -338,6 +454,36 @@ mod imp {
             // The handler won't fire; the Sender it owns drops here, so the
             // caller's recv returns Err (disconnected) rather than hanging.
         }
+    }
+
+    /// Run `script` through CDP's `Runtime.evaluate` and forward its boolean
+    /// result. The completion handler fires asynchronously on the UI thread; if
+    /// the call can't be issued at all the `Sender` drops here, so the waiting
+    /// caller's `recv` returns `Err` immediately rather than blocking.
+    pub unsafe fn eval_bool(pw: &PlatformWebview, script: &str, tx: std::sync::mpsc::Sender<bool>) {
+        let Ok(core) = pw.controller().CoreWebView2() else {
+            return;
+        };
+        let method = HSTRING::from("Runtime.evaluate");
+        let params = HSTRING::from(
+            serde_json::json!({ "expression": script, "returnByValue": true }).to_string(),
+        );
+        let handler =
+            CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |hr, result| {
+                let json = if hr.is_ok() { result } else { String::new() };
+                let value = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|v| v.get("result")?.get("value")?.as_bool());
+                if let Some(value) = value {
+                    let _ = tx.send(value);
+                }
+                Ok(())
+            }));
+        let _ = core.CallDevToolsProtocolMethod(
+            PCWSTR(method.as_ptr()),
+            PCWSTR(params.as_ptr()),
+            &handler,
+        );
     }
 
     pub fn cancel_download(id: &str) {
@@ -471,7 +617,7 @@ mod imp {
                 return Ok(());
             };
             let req_id = next_req_id("perm");
-            PERMS.with(|m| m.borrow_mut().insert(req_id.clone(), (args.clone(), deferral)));
+            pause(&PERMS, req_id.clone(), args.clone(), deferral);
             let value = serde_json::json!({
                 "id": req_id, "kind": kind_str, "origin": origin,
             })
@@ -485,19 +631,16 @@ mod imp {
 
     /// Answer a permission prompt. Runs on the UI thread (marshaled by the
     /// command) since the args/deferral have thread affinity.
-    pub fn permission_respond(id: &str, allow: bool) {
-        PERMS.with(|m| {
-            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
-                unsafe {
-                    let state = if allow {
-                        COREWEBVIEW2_PERMISSION_STATE_ALLOW
-                    } else {
-                        COREWEBVIEW2_PERMISSION_STATE_DENY
-                    };
-                    let _ = args.SetState(state);
-                    let _ = deferral.Complete();
-                }
-            }
+    pub fn permission_respond(id: &str, decision: &str) {
+        resolve(&PERMS, id, |args| unsafe {
+            let state = match decision {
+                "allow" => COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+                "block" => COREWEBVIEW2_PERMISSION_STATE_DENY,
+                // Dismissed without a decision: deny this request, remember
+                // nothing, ask again next time. Matches Chrome's `×`.
+                _ => COREWEBVIEW2_PERMISSION_STATE_DEFAULT,
+            };
+            let _ = args.SetState(state);
         });
     }
 
@@ -519,7 +662,7 @@ mod imp {
                     return Ok(());
                 };
                 let req_id = next_req_id("auth");
-                AUTHS.with(|m| m.borrow_mut().insert(req_id.clone(), (args.clone(), deferral)));
+                pause(&AUTHS, req_id.clone(), args.clone(), deferral);
                 let value = serde_json::json!({
                     "id": req_id, "origin": uri, "challenge": challenge,
                 })
@@ -534,23 +677,18 @@ mod imp {
     /// Answer a basic-auth prompt: supply credentials, or cancel if the user
     /// dismissed it. UI thread only.
     pub fn basic_auth_respond(id: &str, username: Option<String>, password: Option<String>) {
-        AUTHS.with(|m| {
-            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
-                unsafe {
-                    match (username, password) {
-                        (Some(u), Some(p)) => {
-                            if let Ok(resp) = args.Response() {
-                                let uw: Vec<u16> = u.encode_utf16().chain([0]).collect();
-                                let pw: Vec<u16> = p.encode_utf16().chain([0]).collect();
-                                let _ = resp.SetUserName(PWSTR(uw.as_ptr() as *mut u16));
-                                let _ = resp.SetPassword(PWSTR(pw.as_ptr() as *mut u16));
-                            }
-                        }
-                        _ => {
-                            let _ = args.SetCancel(true);
-                        }
+        resolve(&AUTHS, id, |args| unsafe {
+            match (username, password) {
+                (Some(u), Some(p)) => {
+                    if let Ok(resp) = args.Response() {
+                        let uw: Vec<u16> = u.encode_utf16().chain([0]).collect();
+                        let pw: Vec<u16> = p.encode_utf16().chain([0]).collect();
+                        let _ = resp.SetUserName(PWSTR(uw.as_ptr() as *mut u16));
+                        let _ = resp.SetPassword(PWSTR(pw.as_ptr() as *mut u16));
                     }
-                    let _ = deferral.Complete();
+                }
+                _ => {
+                    let _ = args.SetCancel(true);
                 }
             }
         });
@@ -572,12 +710,6 @@ mod imp {
             }
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
             let _ = args.WebErrorStatus(&mut status);
-            eprintln!(
-                "[UWB-PROBE] nav-completed tab={} status={} source={}",
-                tab_id,
-                status.0,
-                read_pwstr(|p| core_for_source.Source(p))
-            );
             // A navigation we deliberately cancelled (external-protocol handoff,
             // stop button) isn't an error — don't draw an error page for it.
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
@@ -636,7 +768,7 @@ mod imp {
                     return Ok(());
                 };
                 let req_id = next_req_id("cert");
-                CERTS.with(|m| m.borrow_mut().insert(req_id.clone(), (args.clone(), deferral)));
+                pause(&CERTS, req_id.clone(), args.clone(), deferral);
                 let value =
                     serde_json::json!({ "id": req_id, "url": uri, "code": status.0 }).to_string();
                 crate::tabs::emit_tab_event(&app, &tab_id, "cert-error", value);
@@ -649,18 +781,13 @@ mod imp {
     /// Resolve a certificate interstitial: proceed (allow this cert for the
     /// session) or cancel the load. UI thread only.
     pub fn cert_respond(id: &str, proceed: bool) {
-        CERTS.with(|m| {
-            if let Some((args, deferral)) = m.borrow_mut().remove(id) {
-                unsafe {
-                    let action = if proceed {
-                        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW
-                    } else {
-                        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL
-                    };
-                    let _ = args.SetAction(action);
-                    let _ = deferral.Complete();
-                }
-            }
+        resolve(&CERTS, id, |args| unsafe {
+            let action = if proceed {
+                COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW
+            } else {
+                COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL
+            };
+            let _ = args.SetAction(action);
         });
     }
 
@@ -880,9 +1007,9 @@ mod imp {
                 _ => None,
             };
         }
-        // F5: reload, F12: developer tools (no modifiers required).
-        if vk == 0x74 && !ctrl && !alt {
-            return Some("reload");
+        // F5: reload (Ctrl+F5 bypasses the cache), F12: developer tools.
+        if vk == 0x74 && !alt {
+            return Some(if ctrl { "hard-reload" } else { "reload" });
         }
         if vk == 0x7B && !ctrl && !alt {
             return Some("devtools"); // VK_F12
@@ -897,7 +1024,7 @@ mod imp {
             0x54 => Some(if shift { "reopen-tab" } else { "new-tab" }), // T
             0x57 => Some("close-tab"),                                  // W
             0x4C => Some("focus-omnibox"),                             // L
-            0x52 => Some("reload"),                                     // R
+            0x52 => Some(if shift { "hard-reload" } else { "reload" }), // R
             0x46 => Some("find"),                                       // F
             0x48 => Some("history"),                                    // H
             0x50 => Some("print"),                                      // P
@@ -905,6 +1032,7 @@ mod imp {
             0x44 => Some("pin"),                                        // D
             0x2E | 0x08 if shift => Some("clear-data"),                 // Delete/Backspace
             0xBC => Some("settings"),                                   // VK_OEM_COMMA
+            0xBF => Some("shortcuts"),                                  // VK_OEM_2 (/)
             0xC0 => Some("terminal"),                                   // VK_OEM_3 (`)
             0x31 => Some("tab-1"),
             0x32 => Some("tab-2"),
@@ -951,15 +1079,9 @@ mod imp {
         let handler = FaviconChangedEventHandler::create(Box::new(move |sender, _args| {
             if let Some(sender) = sender.as_ref() {
                 if let Ok(core15) = sender.cast::<ICoreWebView2_15>() {
-                    let mut uri = windows::core::PWSTR::null();
-                    if core15.FaviconUri(&mut uri).is_ok() && !uri.is_null() {
-                        let s = uri.to_string().unwrap_or_default();
-                        windows::Win32::System::Com::CoTaskMemFree(Some(
-                            uri.0 as *const core::ffi::c_void,
-                        ));
-                        if !s.is_empty() {
-                            crate::tabs::emit_tab_event(&app, &id, "favicon", s);
-                        }
+                    let uri = read_pwstr(|p| core15.FaviconUri(p));
+                    if !uri.is_empty() {
+                        crate::tabs::emit_tab_event(&app, &id, "favicon", uri);
                     }
                 }
             }

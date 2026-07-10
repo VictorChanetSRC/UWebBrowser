@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Bell,
   Camera,
@@ -22,8 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusPage } from "@/components/ui/status-page";
 import { PromptIcon, PromptModal, PromptActions } from "@/components/ui/prompt";
-import { POPOVER_SURFACE, Z_POPOVER } from "@/components/ui/overlay";
-import { cn } from "@/lib/utils";
 import { hostOf } from "../lib/url";
 
 /** The permission kinds the backend surfaces (see webext.rs `perm_kind_str`). */
@@ -42,50 +40,64 @@ const PERMISSION_COPY: Record<string, { icon: typeof Camera; label: string }> = 
   clipboard: { icon: Clipboard, label: "read from your clipboard" },
 };
 
-/** Chrome-style permission bubble that drops from under the omnibox. Allow/Block
- *  is remembered per-origin by WebView2, so we never re-ask after a decision. */
+/** How the user answered a permission request. `allow`/`block` are remembered
+ *  per-origin by WebView2; `dismiss` denies this one request and remembers
+ *  nothing, so backing out of the prompt can't permanently blacklist a site. */
+export type PermissionDecision = "allow" | "block" | "dismiss";
+
+/**
+ * Chrome-style permission bubble, anchored under the omnibox. It is a real
+ * modal — the page's webview is hidden behind it anyway, and a request for the
+ * camera or microphone is a security decision that must be announced, reachable
+ * by keyboard, and escapable.
+ *
+ * Focus opens on **Block**, and Escape/scrim map to `dismiss`, so no accidental
+ * keystroke can grant a capability.
+ */
 export function PermissionPrompt({
   req,
   onRespond,
 }: {
   req: PermissionReq;
-  onRespond: (id: string, allow: boolean) => void;
+  onRespond: (id: string, decision: PermissionDecision) => void;
 }) {
+  const blockRef = useRef<HTMLButtonElement>(null);
   const copy = PERMISSION_COPY[req.kind] ?? {
     icon: ShieldAlert,
     label: `use ${req.kind}`,
   };
   const Icon = copy.icon;
+  const origin = hostOf(req.origin) || req.origin;
+
   return (
-    <div
-      className={cn(
-        "absolute left-4 top-1 w-[340px] animate-rise p-4",
-        Z_POPOVER,
-        POPOVER_SURFACE,
-      )}
+    <PromptModal
+      className="w-[340px]"
+      placement="omnibox"
+      role="alertdialog"
+      label={`${origin} wants to ${copy.label}`}
+      initialFocus={blockRef}
+      onDismiss={() => onRespond(req.id, "dismiss")}
     >
       <div className="flex items-start gap-3">
         <PromptIcon>
           <Icon aria-hidden />
         </PromptIcon>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] text-ink-100">
-            {hostOf(req.origin) || req.origin}
-          </div>
+          <div className="truncate text-[13px] text-ink-100">{origin}</div>
           <div className="mt-0.5 text-[11.5px] leading-snug text-ink-500">
             wants to {copy.label}
           </div>
         </div>
       </div>
       <PromptActions>
-        <Button size="sm" variant="ghost" onClick={() => onRespond(req.id, false)}>
+        <Button ref={blockRef} size="sm" variant="ghost" onClick={() => onRespond(req.id, "block")}>
           Block
         </Button>
-        <Button size="sm" variant="primary" onClick={() => onRespond(req.id, true)}>
+        <Button size="sm" variant="primary" onClick={() => onRespond(req.id, "allow")}>
           Allow
         </Button>
       </PromptActions>
-    </div>
+    </PromptModal>
   );
 }
 
@@ -123,10 +135,14 @@ export function BasicAuthDialog({
         </div>
       </div>
       <div className="mt-4 space-y-2">
+        {/* A placeholder is not an accessible name — it disappears as soon as
+            the field has text. These two are the most sensitive inputs in the
+            app; name them properly. */}
         <Input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Username"
+          aria-label="Username"
           autoComplete="username"
         />
         <Input
@@ -134,6 +150,7 @@ export function BasicAuthDialog({
           onChange={(e) => setPassword(e.target.value)}
           type="password"
           placeholder="Password"
+          aria-label="Password"
           autoComplete="current-password"
         />
       </div>

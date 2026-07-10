@@ -1,5 +1,5 @@
 import { createWidgetRegistry } from "../registry";
-import type { BarBodyProps, BarEditorProps, BarWidgetSpec } from "./define";
+import type { AnyBarWidgetSpec, BarBodyProps, BarEditorProps } from "./define";
 import steamGame, { type SteamGameWidget } from "./steam-game";
 import steamPlayers, { type SteamPlayersWidget } from "./steam-players";
 import revenue, { type RevenueWidget } from "./revenue";
@@ -34,7 +34,7 @@ export type WidgetType = Widget["type"];
  * file; the registry views them through the loose base shape — the dispatch
  * helpers below are the only places that cross that line.
  */
-export const BAR_WIDGETS: readonly BarWidgetSpec<any>[] = [
+export const BAR_WIDGETS: readonly AnyBarWidgetSpec[] = [
   steamGame,
   steamPlayers,
   revenue,
@@ -45,7 +45,7 @@ export const BAR_WIDGETS: readonly BarWidgetSpec<any>[] = [
   links,
 ];
 
-const registry = createWidgetRegistry<WidgetType, BarWidgetSpec<any>>(BAR_WIDGETS);
+const registry = createWidgetRegistry<WidgetType, AnyBarWidgetSpec>(BAR_WIDGETS);
 
 export const BAR_SPECS = registry.specs;
 /** Every registered type, for storage validation. */

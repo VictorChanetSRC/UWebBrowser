@@ -21,18 +21,18 @@
 //! suit.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::LazyLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::cache::{get_or_fetch, TtlCache};
 use crate::http::{self, get_json};
+use crate::ledger;
 
 static ITCH: LazyLock<TtlCache<Value>> = LazyLock::new(|| TtlCache::new(Duration::from_secs(300)));
 
@@ -62,37 +62,22 @@ struct Ledger {
 }
 
 fn ledger_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("sales");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("itch.json"))
+    ledger::path(app, "itch.json")
 }
 
 fn load(app: &AppHandle) -> Ledger {
     ledger_path(app)
-        .ok()
-        .and_then(|path| fs::read(path).ok())
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .as_ref()
+        .map(ledger::load_or_default)
         .unwrap_or_default()
 }
 
 fn save(app: &AppHandle, ledger: &Ledger) -> Result<(), String> {
-    let path = ledger_path(app)?;
-    let body = serde_json::to_vec(ledger).map_err(|e| e.to_string())?;
-    // Write-then-rename: a crash mid-write can't leave a truncated ledger.
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    ledger::save_atomic(&ledger_path(app)?, ledger)
 }
 
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    ledger::now_secs()
 }
 
 /// The UTC calendar day containing `secs`.
@@ -124,11 +109,7 @@ fn fingerprint(api_key: &str) -> String {
 /// itch quotes money as integer minor units, but has been known to send them as
 /// JSON strings; accept either rather than silently reading zero.
 fn cents(value: &Value) -> i64 {
-    value
-        .as_i64()
-        .or_else(|| value.as_f64().map(|f| f as i64))
-        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-        .unwrap_or(0)
+    ledger::json_i64(value)
 }
 
 /// The account's running lifetime total, summed across games, per currency.
@@ -147,13 +128,8 @@ fn totals_of(games: &Value) -> Totals {
     totals
 }
 
-fn prune(ledger: &mut Ledger) {
-    while ledger.days.len() > KEEP_DAYS {
-        let Some(oldest) = ledger.days.keys().next().cloned() else {
-            break;
-        };
-        ledger.days.remove(&oldest);
-    }
+fn prune(entries: &mut Ledger) {
+    ledger::prune_oldest(&mut entries.days, KEEP_DAYS);
 }
 
 /// Fold one observation of the running total into the ledger.

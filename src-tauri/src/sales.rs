@@ -23,14 +23,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Datelike, Days, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::http;
+use crate::ledger;
 
 const BASE: &str = "https://partner.steam-api.com/IPartnerFinancialsService";
 /// Daily data doesn't move faster than this, and the ledger survives restarts.
@@ -130,39 +130,21 @@ struct Store {
 }
 
 fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("sales");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("steam.json"))
+    ledger::path(app, "steam.json")
 }
 
 fn load(app: &AppHandle) -> Result<Store, String> {
-    let path = store_path(app)?;
     // A ledger we can't parse is a ledger we resync from the cursor, not a
     // reason to leave the tile dead.
-    Ok(fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default())
+    Ok(ledger::load_or_default(&store_path(app)?))
 }
 
 fn save(app: &AppHandle, store: &Store) -> Result<(), String> {
-    let path = store_path(app)?;
-    let body = serde_json::to_vec(store).map_err(|e| e.to_string())?;
-    // Write-then-rename: a crash mid-write can't leave a truncated ledger.
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    ledger::save_atomic(&store_path(app)?, store)
 }
 
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    ledger::now_secs()
 }
 
 /* ----------------------------------- http ---------------------------------- */
@@ -208,19 +190,11 @@ async fn call(method: &str, params: &[(&str, String)]) -> Result<Value, String> 
 /// Steam serialises 64-bit ids — and some money fields — as JSON strings.
 /// Accept either shape rather than silently reading them as zero.
 fn num(value: &Value) -> f64 {
-    value
-        .as_f64()
-        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-        .unwrap_or(0.0)
+    ledger::json_f64(value)
 }
 
 fn uint(value: &Value) -> u64 {
-    let n = num(value);
-    if n > 0.0 {
-        n as u64
-    } else {
-        0
-    }
+    ledger::json_u64(value)
 }
 
 /* ----------------------------------- sync ---------------------------------- */
@@ -319,23 +293,18 @@ async fn fetch_day(date: &str) -> Result<BTreeMap<String, Day>, String> {
 }
 
 fn prune(store: &mut Store) {
-    while store.days.len() > KEEP_DAYS {
-        let Some(oldest) = store.days.keys().next().cloned() else {
-            break;
-        };
-        store.days.remove(&oldest);
-    }
+    ledger::prune_oldest(&mut store.days, KEEP_DAYS);
 }
 
 /// Pull every date Steam says changed since our cursor and rewrite those days.
-/// Reentrant-safe: a second caller while one is in flight is a no-op.
+/// Reentrant-safe: a second caller while one is in flight is a no-op. The guard
+/// resets on drop, so a panic inside `sync_inner` can't wedge the flag `true`
+/// and silently disable every later sync for the life of the process.
 async fn sync(app: &AppHandle) -> Result<(), String> {
-    if SYNCING.swap(true, Ordering::SeqCst) {
+    let Some(_guard) = ledger::Flag::claim(&SYNCING) else {
         return Ok(());
-    }
-    let result = sync_inner(app).await;
-    SYNCING.store(false, Ordering::SeqCst);
-    result
+    };
+    sync_inner(app).await
 }
 
 async fn sync_inner(app: &AppHandle) -> Result<(), String> {

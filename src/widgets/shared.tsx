@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Game } from "@/lib/config";
+import { SHARE_OPTIONS } from "@/lib/sales";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,23 @@ export function WidgetHint({
     </p>
   );
 }
+
+/**
+ * The two literals the board editor and the work-bar editor both spell out for
+ * every widget row. They aren't worth a shared *row component* — one is a
+ * horizontal strip, the other a grid-tile overlay — but they must not drift.
+ */
+/** The `01`, `02`, … ordinal at the head of an editable widget row. */
+export function IndexBadge({ index }: { index: number }) {
+  return (
+    <span className="w-5 flex-none font-mono text-[10.5px] tabular-nums text-ink-500">
+      {String(index + 1).padStart(2, "0")}
+    </span>
+  );
+}
+
+/** The ghost icon-button skin used by a widget row's own controls. */
+export const ROW_CONTROL = "size-6 flex-none rounded-md text-ink-500";
 
 /** A stack of placeholder rows for the loading state of a list widget. */
 export function RowSkeletons({ count = 3, className }: { count?: number; className?: string }) {
@@ -100,6 +118,28 @@ export function TracksGameChips<W extends { gameId: string | null }>({
       selected={selected?.id ?? null}
       // The key is a real game id; TS just can't see that through the generic.
       onPick={(gameId) => onPatch({ gameId } as Partial<W>)}
+    />
+  );
+}
+
+/** The "your cut of net sales" chip row, shared by both revenue surfaces. Owns
+ *  the number↔string round-trip `ChipRow` forces on its keys. */
+export function ShareChips({
+  value,
+  onPick,
+  className,
+}: {
+  value: number;
+  onPick: (pct: number) => void;
+  className?: string;
+}) {
+  return (
+    <ChipRow
+      className={className}
+      label="Your cut"
+      options={SHARE_OPTIONS.map((pct) => ({ key: String(pct), label: `${pct}%` }))}
+      selected={String(value)}
+      onPick={(pct) => onPick(Number(pct))}
     />
   );
 }

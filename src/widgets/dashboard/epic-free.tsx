@@ -1,6 +1,6 @@
 import { Gift } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { shortDate, sourceError, usd } from "@/lib/format";
+import { shortDate, usd } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
@@ -21,7 +21,8 @@ function EpicFreeBody({ active, onOpen }: DashBodyProps<EpicFreeWidget>) {
   return (
     <DataCard
       label="Epic · Free games"
-      error={!games && error ? sourceError("Epic", error) : null}
+      source="Epic"
+      error={error}
       loading={!games}
       skeleton={<RowSkeletons count={4} className="h-12" />}
       links={

@@ -57,15 +57,41 @@ npm run tauri build
 
 Installers land in `src-tauri/target/release/bundle/`.
 
+Before you push — the same four things CI runs:
+
+```sh
+npm run lint
+npm run build          # tsc, then vite
+npm test               # vitest
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
 ## Shortcuts
+
+Press `Ctrl+/` in the app for this list. Every one of them works whether the
+chrome or the page has focus.
 
 | Keys | Action |
 | --- | --- |
 | `Ctrl+T` | New tab |
 | `Ctrl+W` | Close tab |
+| `Ctrl+Shift+T` | Reopen the last closed tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+1` … `Ctrl+9` | Jump to tab |
 | `Ctrl+L` | Focus address bar |
-| `F12` | Open DevTools |
-| `Ctrl+Shift+I` | Open DevTools |
+| `Alt+←` / `Alt+→` | Back / forward |
+| `Ctrl+R` · `F5` | Reload |
+| `Ctrl+Shift+R` · `Ctrl+F5` | Reload, bypassing the cache |
+| `Ctrl+F` | Find on page |
+| `Ctrl+D` | Pin to the work bar |
+| `F12` · `Ctrl+Shift+I` | DevTools |
+| `` Ctrl+` `` | Terminal |
+| `Ctrl+J` | Downloads |
+| `Ctrl+H` | History |
+| `Ctrl+P` | Print |
+| `Ctrl+,` | Settings |
+| `Ctrl+Shift+Del` | Clear browsing data |
+| `Ctrl+/` | Keyboard shortcuts |
 
 ## Under the hood
 

@@ -1,22 +1,21 @@
 import { Coins } from "lucide-react";
-import { ipc } from "@/lib/ipc";
 import { fmtChange, fmtDay, fmtNumber, fmtUsd } from "@/lib/format";
+import { usePlayerCount, useSteamSales } from "../data";
 import {
   DEFAULT_SHARE_PCT,
   NO_SALES_YET,
   NOT_CONNECTED,
-  SHARE_OPTIONS,
   share,
+  shareLabel,
 } from "@/lib/sales";
-import { usePolled } from "@/hooks/use-polled";
 import { Label } from "@/components/ui/label";
 import { LiveDot } from "@/components/ui/live-dot";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkline } from "@/components/ui/sparkline";
-import { TracksGameChips } from "../shared";
+import { SparkTrace } from "@/components/ui/sparkline";
+import { ShareChips, TracksGameChips } from "../shared";
 import { trackedAppId, trackedGame, VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps, type BarEditorProps } from "./define";
-import { ChipRow, SteamState, WidgetCard, WidgetHint } from "./shared";
+import { SteamState, WidgetCard, WidgetHint } from "./shared";
 
 /**
  * Yesterday's takings in the rail, next to the one number about your game that
@@ -32,29 +31,12 @@ export type RevenueWidget = {
   sharePct: number;
 };
 
-const SALES_POLL_MS = 300_000;
-const PLAYERS_POLL_MS = 30_000;
-
 function RevenueBody({ widget, games, active, onOpen }: BarBodyProps<RevenueWidget>) {
   const game = trackedGame(widget.gameId, games);
   const appid = trackedAppId(widget.gameId, games);
 
-  const { data, error } = usePolled(
-    () => ipc.steamSalesSummary(appid),
-    [appid],
-    SALES_POLL_MS,
-    !!appid && active,
-    `sales:${appid}`,
-  );
-  // Shares its inflight call and TTL cache with the Steam players widget, so a
-  // rail carrying both still hits Steam once per tick.
-  const { data: players } = usePolled(
-    () => ipc.steamPlayers(appid),
-    [appid],
-    PLAYERS_POLL_MS,
-    !!appid && active,
-    `players:${appid}`,
-  );
+  const { data, error } = useSteamSales(appid, active);
+  const { data: players } = usePlayerCount(appid, active);
 
   const pct = widget.sharePct;
 
@@ -86,17 +68,12 @@ function RevenueBody({ widget, games, active, onOpen }: BarBodyProps<RevenueWidg
                 <span className="text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em]">
                   {fmtUsd(share(sales.latest.netUsd, pct))}
                 </span>
-                <Label size="micro">{fmtDay(sales.latest.date)} · {pct}% share</Label>
+                <Label size="micro">
+                  {fmtDay(sales.latest.date)} · {shareLabel(pct)}
+                </Label>
               </div>
 
-              {sales.spark && sales.spark.length > 1 && (
-                <Sparkline
-                  values={sales.spark}
-                  capacity={sales.spark.length}
-                  max={Math.max(...sales.spark, 1)}
-                  className="h-6"
-                />
-              )}
+              {sales.spark && <SparkTrace values={sales.spark} className="h-6" />}
 
               <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-400">
                 <span className="truncate">
@@ -126,12 +103,10 @@ function RevenueEditor({ widget, games, onPatch }: BarEditorProps<RevenueWidget>
   return (
     <div className="border-t border-border">
       <TracksGameChips widget={widget} games={games} onPatch={onPatch} className="p-2.5 pl-3.5" />
-      <ChipRow
-        label="Your cut"
+      <ShareChips
+        value={widget.sharePct}
+        onPick={(sharePct) => onPatch({ sharePct })}
         className={games.length > 1 ? "border-t border-border p-2.5 pl-3.5" : "p-2.5 pl-3.5"}
-        options={SHARE_OPTIONS.map((pct) => ({ key: String(pct), label: `${pct}%` }))}
-        selected={String(widget.sharePct)}
-        onPick={(pct) => onPatch({ sharePct: Number(pct) })}
       />
     </div>
   );

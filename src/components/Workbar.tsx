@@ -10,6 +10,7 @@ import {
   type Widget,
 } from "../lib/workbar";
 import { BAR_SPECS, BarWidgetEditor, barWidgetTitle } from "@/widgets/workbar";
+import { IndexBadge, ROW_CONTROL } from "@/widgets/shared";
 import { WorkbarShop } from "./WidgetShop";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
@@ -124,14 +125,12 @@ function BarRow({
 }) {
   const spec = BAR_SPECS[widget.type];
   const Icon = spec.icon;
-  const control = "size-6 flex-none rounded-md text-ink-500";
+  const control = ROW_CONTROL;
 
   return (
     <article className="overflow-hidden rounded-xl border border-border bg-ink-900">
       <div className="flex items-center gap-2 py-2 pl-3.5 pr-2">
-        <span className="w-5 flex-none font-mono text-[10.5px] tabular-nums text-ink-500">
-          {String(index + 1).padStart(2, "0")}
-        </span>
+        <IndexBadge index={index} />
         <Icon className="size-3.5 flex-none text-ink-400" aria-hidden />
         {spec.rename ? (
           <Input

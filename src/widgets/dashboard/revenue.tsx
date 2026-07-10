@@ -1,29 +1,26 @@
 import { Banknote } from "lucide-react";
-import { ipc } from "@/lib/ipc";
-import { fmtChange, fmtDay, fmtNumber, fmtUsd, MISSING, sourceError } from "@/lib/format";
+import { fmtChange, fmtDay, fmtNumber, fmtUsd, MISSING } from "@/lib/format";
 import {
   DEFAULT_SHARE_PCT,
   NO_SALES_YET,
   NOT_CONNECTED,
   SALES_CAVEAT,
-  SHARE_OPTIONS,
   share,
   shareLabel,
 } from "@/lib/sales";
-import { usePolled } from "@/hooks/use-polled";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkline } from "@/components/ui/sparkline";
-import { TracksGameChips } from "../shared";
+import { SparkTrace } from "@/components/ui/sparkline";
+import { useSteamSales } from "../data";
+import { ShareChips, TracksGameChips } from "../shared";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type DashConfigProps, type TileSpan } from "./define";
 import {
   CardLink,
-  ChipRow,
   ConfigStrip,
   DataCard,
   Stat,
   StatGrid,
+  StatGridSkeleton,
   TileHint,
   trackedAppId,
   trackedGame,
@@ -40,20 +37,10 @@ export type RevenueWidget = {
   sharePct: number;
 };
 
-/** The ledger only moves once a day; the backend won't resync inside 30 min.
- *  This poll is just how fast the tile notices a sync that already happened. */
-const POLL_MS = 300_000;
-
 function RevenueBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<RevenueWidget>) {
   const game = trackedGame(widget.gameId, games);
   const appid = trackedAppId(widget.gameId, games);
-  const { data, error } = usePolled(
-    () => ipc.steamSalesSummary(appid),
-    [appid],
-    POLL_MS,
-    !!appid && active,
-    `sales:${appid}`,
-  );
+  const { data, error } = useSteamSales(appid, active);
 
   if (!game) {
     return (
@@ -81,15 +68,10 @@ function RevenueBody({ widget, games, active, onOpen, onEditSetup }: DashBodyPro
   return (
     <DataCard
       label={`Revenue · ${shareLabel(pct)}`}
-      error={!data && error ? sourceError("Steamworks", error) : null}
+      source="Steamworks"
+      error={error}
       loading={!data}
-      skeleton={
-        <StatGrid>
-          {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-[78px]" />
-          ))}
-        </StatGrid>
-      }
+      skeleton={<StatGridSkeleton count={6} />}
       links={
         data?.connected ? (
           <CardLink onClick={() => onOpen("https://partner.steampowered.com/")}>
@@ -128,13 +110,9 @@ function RevenueBody({ widget, games, active, onOpen, onEditSetup }: DashBodyPro
             />
           </StatGrid>
 
-          {data.spark && data.spark.length > 1 && (
-            <Sparkline
+          {data.spark && (
+            <SparkTrace
               values={data.spark.map((netUsd) => share(netUsd, pct))}
-              capacity={data.spark.length}
-              // A fixed 0..max scale: the trace should show the shape of the
-              // month, and a zero day should sit on the floor.
-              max={Math.max(...data.spark.map((netUsd) => share(netUsd, pct)), 1)}
               className="h-10"
             />
           )}
@@ -153,12 +131,10 @@ function RevenueConfig({ widget, games, onPatch }: DashConfigProps<RevenueWidget
   return (
     <ConfigStrip>
       <TracksGameChips widget={widget} games={games} onPatch={onPatch} />
-      <ChipRow
-        label="Your cut"
+      <ShareChips
+        value={widget.sharePct}
+        onPick={(sharePct) => onPatch({ sharePct })}
         className={games.length > 1 ? "border-t border-border" : undefined}
-        options={SHARE_OPTIONS.map((pct) => ({ key: String(pct), label: `${pct}%` }))}
-        selected={String(widget.sharePct)}
-        onPick={(pct) => onPatch({ sharePct: Number(pct) })}
       />
     </ConfigStrip>
   );

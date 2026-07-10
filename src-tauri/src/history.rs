@@ -283,23 +283,7 @@ fn find_exes(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
 /// Show a folder in the system file manager.
 #[tauri::command]
 pub async fn reveal_in_explorer(path: String) -> Result<(), String> {
-    // `exists()` stats the disk and `spawn` blocks briefly; run off the async
-    // worker.
-    tauri::async_runtime::spawn_blocking(move || {
-        if !PathBuf::from(&path).exists() {
-            return Err(format!("{path} doesn't exist — was it moved or deleted?"));
-        }
-        #[cfg(windows)]
-        let mut cmd = Command::new("explorer");
-        #[cfg(target_os = "macos")]
-        let mut cmd = Command::new("open");
-        #[cfg(all(not(windows), not(target_os = "macos")))]
-        let mut cmd = Command::new("xdg-open");
-        cmd.arg(&path).spawn().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    crate::os::with_existing_path(path, crate::os::open_path).await
 }
 
 /// Launch the game from a packaged (archived) build directory: prefer

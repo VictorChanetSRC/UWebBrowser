@@ -31,12 +31,19 @@ function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamP
   const appid = trackedAppId(widget.gameId, games);
   // Wrap the count in a fresh object so every poll — even one returning the
   // same number — lands as an update; the blink and the trace key off it.
+  //
+  // The cache key must NOT be `players:${appid}`: that slot belongs to the bare
+  // number `usePlayerCount` stores, and `usePolled`'s hydration cache is keyed by
+  // string alone. Sharing it would hand this widget a number where it expects
+  // `{players, at}` (and the revenue widget an object where it expects a number)
+  // the moment both are on the rail. The underlying request is still deduped —
+  // `ipc.steamPlayers` coalesces in flight, and the backend caches it.
   const { data, error } = usePolled(
     async () => ({ players: await ipc.steamPlayers(appid), at: Date.now() }),
     [appid],
     POLL_MS,
     !!appid && active,
-    `players:${appid}`,
+    `players-sample:${appid}`,
   );
 
   const [samples, setSamples] = useState<PlayerSample[]>([]);

@@ -1,7 +1,7 @@
 import { GitBranch } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { GITHUB_NEW_ISSUE_URL, GITHUB_REPO_URL } from "@/lib/github";
-import { feedDate, fmtNumber, MISSING, sourceError } from "@/lib/format";
+import { feedDate, fmtNumber, MISSING } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
@@ -55,7 +55,8 @@ function GithubBody({ widget, active, onOpen }: DashBodyProps<GithubWidget>) {
   return (
     <DataCard
       label="UWebBrowser on GitHub"
-      error={!stats && statsError ? sourceError("GitHub", statsError) : null}
+      source="GitHub"
+      error={statsError}
       loading={!stats}
       skeleton={<RowSkeletons count={3} />}
       links={

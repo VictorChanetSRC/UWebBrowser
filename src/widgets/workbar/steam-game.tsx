@@ -1,8 +1,7 @@
 import { Gamepad2 } from "lucide-react";
-import { ipc } from "@/lib/ipc";
 import { MISSING } from "@/lib/format";
 import { positivePct, priceLabel } from "@/lib/steam";
-import { usePolled } from "@/hooks/use-polled";
+import { useSteamStats } from "../data";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trackedAppId, trackedGame, VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
@@ -20,13 +19,7 @@ function SteamGameBody({ widget, games, active, onOpen }: BarBodyProps<SteamGame
   const game = trackedGame(widget.gameId, games);
   const appid = trackedAppId(widget.gameId, games);
   // Key art, reviews and price barely move; 5 minutes is plenty.
-  const { data, error } = usePolled(
-    () => ipc.steamStats(appid),
-    [appid],
-    300_000,
-    !!appid && active,
-    `game:${appid}`,
-  );
+  const { data, error } = useSteamStats(appid, active);
 
   const positive = positivePct(data?.reviews);
   // The compact card has no separate release row, so fold "Coming soon" into

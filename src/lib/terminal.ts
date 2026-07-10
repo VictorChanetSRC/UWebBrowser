@@ -7,7 +7,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { ipc } from "./ipc";
+import { ipc, silent } from "./ipc";
 
 type Session = {
   term: Terminal;
@@ -103,9 +103,11 @@ export function attachTerminal(id: string, host: HTMLElement) {
       }
       return;
     }
-    ipc.termWrite(id, data).catch(() => {});
+    // Per keystroke: a write that loses the race with a dying PTY is normal,
+    // and a toast for each one would bury the screen.
+    silent(ipc.termWrite(id, data));
   });
-  term.onResize(({ cols, rows }) => ipc.termResize(id, cols, rows).catch(() => {}));
+  term.onResize(({ cols, rows }) => silent(ipc.termResize(id, cols, rows)));
 
   startShell(id, session);
 }
@@ -131,6 +133,7 @@ export function pruneTerminals(alive: Set<string>) {
     if (alive.has(id)) continue;
     sessions.delete(id);
     session.term.dispose();
-    ipc.termClose(id).catch(() => {});
+    // Teardown racing a PTY that already exited on its own.
+    silent(ipc.termClose(id));
   }
 }

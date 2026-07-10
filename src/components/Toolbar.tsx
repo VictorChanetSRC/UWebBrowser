@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import type { Tab } from "../App";
-import { HOME_URL } from "../App";
+import { HOME_URL } from "../lib/pages";
 import { suggestFromHistory, type HistoryEntry } from "../lib/history";
 import type { SearchEngine } from "../lib/settings";
 import { IconButton } from "@/components/ui/icon-button";
@@ -30,10 +30,10 @@ import { Button } from "@/components/ui/button";
 import { Downloads } from "@/components/Downloads";
 import { DismissLayer } from "@/components/ui/dismiss-layer";
 import { POPOVER_SURFACE, Z_POPOVER } from "@/components/ui/overlay";
-import { usePolled } from "@/hooks/use-polled";
+import { useEscape } from "@/hooks/use-escape";
+import { useGithubStars } from "@/hooks/use-github-stars";
 import { useTimedFlag } from "@/hooks/use-timed-flag";
 import { fmtNumber } from "@/lib/format";
-import { ipc } from "@/lib/ipc";
 import { copyText, storeExtensionId } from "@/lib/url";
 import { cn } from "@/lib/utils";
 import { SiteIcon, SiteLabel } from "@/components/ui/site-row";
@@ -48,7 +48,8 @@ type Props = {
   onNavigate: (input: string) => void;
   onBack: () => void;
   onForward: () => void;
-  onReload: () => void;
+  /** `hard` bypasses the HTTP cache — Shift-click, Ctrl+Shift+R, Ctrl+F5. */
+  onReload: (hard?: boolean) => void;
   onStop: () => void;
   onHome: () => void;
   onDiscover: () => void;
@@ -66,6 +67,8 @@ type Props = {
    *  it's open so the dropdown isn't painted over. */
   onDownloadsPanelOpen: (open: boolean) => void;
   downloadsOpenSignal: number;
+  /** Re-request a failed download's source URL. */
+  onRetryDownload: (url: string) => void;
   /** Opens the UWebBrowser repo — the toolbar's standing ask for a star. */
   onGithub: () => void;
   /** Opens the community Discord invite in a new tab. */
@@ -93,8 +96,17 @@ function ToolbarImpl(props: Props) {
   const [pageInfo, setPageInfo] = useState(false);
   const storeId = tab.kind === "web" ? storeExtensionId(tab.url) : null;
   const inputRef = useRef<HTMLInputElement>(null);
+  const pageInfoRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const optionId = (index: number) => `${listId}-opt-${index}`;
+
+  // Every other floating surface honours Escape; this one silently didn't, so a
+  // keyboard user who opened it had to reach for the mouse. Focus goes back to
+  // the padlock, not wherever it happened to be.
+  useEscape(() => {
+    setPageInfo(false);
+    pageInfoRef.current?.focus();
+  }, pageInfo);
 
   const shown = draft ?? (tab.url === HOME_URL ? "" : tab.url);
   const typed = (draft ?? "").trim();
@@ -210,7 +222,12 @@ function ToolbarImpl(props: Props) {
             <X aria-hidden />
           </IconButton>
         ) : (
-          <IconButton label="Reload · Ctrl+R" onClick={props.onReload} disabled={tab.kind === "home"}>
+          <IconButton
+            // Shift-click bypasses the cache, like Chrome's Ctrl+Shift+R.
+            label="Reload · Ctrl+R · Shift-click to bypass cache"
+            onClick={(e) => props.onReload(e.shiftKey)}
+            disabled={tab.kind === "home"}
+          >
             <RotateCw aria-hidden />
           </IconButton>
         )}
@@ -244,10 +261,12 @@ function ToolbarImpl(props: Props) {
         {tab.kind === "web" && !editing && (secure || insecure) ? (
           <div className="relative flex-none">
             <button
+              ref={pageInfoRef}
               type="button"
               onClick={() => setPageInfo((v) => !v)}
               aria-label="Connection info"
               aria-expanded={pageInfo}
+              aria-haspopup="dialog"
               className="flex items-center gap-1.5 rounded text-ink-500 transition-colors duration-[130ms] ease-brand hover:text-ink-300"
             >
               {secure ? (
@@ -264,6 +283,8 @@ function ToolbarImpl(props: Props) {
               <>
                 <DismissLayer onDismiss={() => setPageInfo(false)} />
                 <div
+                  role="dialog"
+                  aria-label="Connection info"
                   className={cn(
                     "absolute left-0 top-7 w-72 animate-rise p-3.5",
                     Z_POPOVER,
@@ -464,6 +485,7 @@ function ToolbarImpl(props: Props) {
       <Downloads
         onPanelOpenChange={props.onDownloadsPanelOpen}
         openSignal={props.downloadsOpenSignal}
+        onRetry={props.onRetryDownload}
       />
 
       <GithubStars onClick={props.onGithub} />
@@ -527,7 +549,7 @@ function pathOf(url: URL): string {
  * GitHub is unreachable) it's just the star glyph — never a broken number.
  */
 function GithubStars({ onClick }: { onClick: () => void }) {
-  const { data: stats } = usePolled(() => ipc.githubRepoStats(), [], 900_000, true, "github_stats");
+  const stars = useGithubStars();
   return (
     <Button
       variant="ghost"
@@ -538,10 +560,8 @@ function GithubStars({ onClick }: { onClick: () => void }) {
       title="Star UWebBrowser on GitHub"
     >
       <Star aria-hidden />
-      {stats !== null && (
-        <span className="font-mono text-[11.5px] leading-none">
-          {fmtNumber(stats.stars)}
-        </span>
+      {stars !== null && (
+        <span className="font-mono text-[11.5px] leading-none">{fmtNumber(stars)}</span>
       )}
     </Button>
   );

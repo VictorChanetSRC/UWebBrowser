@@ -31,6 +31,7 @@ import {
   DashWidgetBody,
   DashWidgetConfig,
 } from "@/widgets/dashboard";
+import { IndexBadge, ROW_CONTROL } from "@/widgets/shared";
 import { DashboardShop } from "./WidgetShop";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -473,9 +474,7 @@ function BentoTile({
             }}
             className="absolute inset-x-2 top-2 flex items-center gap-2 rounded-[10px] border border-border bg-ink-900/95 py-1 pl-2.5 pr-1 shadow-strip backdrop-blur"
           >
-            <span className="w-5 flex-none font-mono text-[10.5px] tabular-nums text-ink-500">
-              {String(index + 1).padStart(2, "0")}
-            </span>
+            <IndexBadge index={index} />
             <Icon className="size-3.5 flex-none text-ink-400" aria-hidden />
             <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-200">
               {title}
@@ -493,7 +492,7 @@ function BentoTile({
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 flex-none rounded-md text-ink-500"
+              className={ROW_CONTROL}
               onClick={onRemove}
               aria-label={`Remove ${title}`}
             >

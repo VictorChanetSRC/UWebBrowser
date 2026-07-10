@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Compass } from "lucide-react";
-import { ipc } from "../lib/ipc";
+import { fire, ipc } from "../lib/ipc";
 import { NudgeCard } from "@/components/ui/nudge-card";
 
 type Props = {
@@ -13,9 +13,13 @@ type Props = {
 export function DefaultBrowserPrompt({ onDismiss }: Props) {
   const [opened, setOpened] = useState(false);
 
+  // Only claim a Settings page opened once one actually has: the body text
+  // below tells the user to go and pick UWebBrowser in it.
   const openSettings = () => {
-    setOpened(true);
-    ipc.openDefaultBrowserSettings().catch(() => {});
+    fire(
+      ipc.openDefaultBrowserSettings().then(() => setOpened(true)),
+      "Couldn’t open Windows Settings",
+    );
   };
 
   return (

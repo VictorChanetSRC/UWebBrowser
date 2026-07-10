@@ -83,6 +83,21 @@ export function GameFinder({
         </Button>
       </form>
 
+      {/* The sweep is the first thing a new user does, and every spinner in it is
+          aria-hidden — without this it runs, and finishes, in total silence.
+          Always mounted so the message is announced when it changes. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {searching
+          ? `Checking ${PLATFORMS.length} stores for ${name.trim()}…`
+          : done
+            ? foundCount > 0
+              ? `Found on ${foundCount} of ${PLATFORMS.length} channels.`
+              : allFailed
+                ? "Couldn’t reach the stores."
+                : "No listings found."
+            : ""}
+      </p>
+
       {rows && <PlatformCheckList rows={rows} onOpen={onOpen} />}
 
       {done && (

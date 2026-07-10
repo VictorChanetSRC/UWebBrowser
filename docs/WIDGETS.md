@@ -16,14 +16,17 @@ add/remove/reorder, titles and icons all derive from the spec.
 ```text
 src/widgets/
 ├── types.ts               WidgetCreator, VICTOR_CHANET, WidgetShopInfo
+├── authors.ts             the author profiles specs point their `creator` at
+├── data.ts                one hook per live source — useSteamStats, useItchGames, …
+├── shared.tsx             blocks BOTH surfaces use: ChipRow, ShareChips, WidgetHint
 ├── dashboard/             the home board
 │   ├── define.ts          the spec contract (DashWidgetSpec) + tile spans
-│   ├── shared.tsx         DataCard, Stat, FeedRow, ChipRow, ConfigStrip, …
+│   ├── shared.tsx         DataCard, Stat, FeedRow, ConfigStrip, StatGridSkeleton, …
 │   ├── index.tsx          THE REGISTRY — union type + spec list
 │   └── game.tsx …         one file per widget
 └── workbar/               the side rail
     ├── define.ts          the spec contract (BarWidgetSpec)
-    ├── shared.tsx         WidgetCard, WidgetHint
+    ├── shared.tsx         WidgetCard, WidgetHint, KeyedState
     ├── index.tsx          THE REGISTRY — union type + spec list
     └── links.tsx …        one file per widget
 ```
@@ -39,6 +42,9 @@ registries. You should never need to touch them.
    the body and thrown away.
 2. **Fetch with `usePolled`, gate on `active`.** Surfaces pass `active: false`
    when they're hidden — respect it or you'll poll forever in the background.
+   If your source already has a hook in `widgets/data.ts`, use that instead:
+   it owns the interval, the gate, and the cache key, so your tile and its
+   work-bar twin can't drift apart.
 3. **Design to the brand.** Ink does the work; Signal appears at most once
    per screen (see `UWebBrowser-Brand-Guidelines.pdf`). Build bodies from the
    shared blocks (`DataCard`, `Stat`, `FeedRow`, `WidgetCard`) so tiles read
@@ -65,6 +71,7 @@ import {
   DataCard,
   Stat,
   StatGrid,
+  StatGridSkeleton,
   TileHint,
   TracksGameConfig,
   trackedGame,
@@ -96,6 +103,7 @@ function WishlistBody({ widget, games, active }: DashBodyProps<WishlistWidget>) 
     [appid],
     300_000,                        // every 5 min
     !!appid && active,              // ALWAYS gate on `active`
+    `wishlist:${appid}`,            // hydration key — same string on both surfaces
   );
 
   if (!game) return <DataCard label="Wishlists"><TileHint>Set up a game first.</TileHint></DataCard>;
@@ -103,8 +111,10 @@ function WishlistBody({ widget, games, active }: DashBodyProps<WishlistWidget>) 
   return (
     <DataCard
       label="Wishlists"
-      error={!data && error ? `Steam didn't answer: ${error}` : null}
+      source="Steam"                // named in the failure line
+      error={error}                 // shown only while `loading` — see below
       loading={!!appid && !data}
+      skeleton={<StatGridSkeleton count={2} />}
     >
       {data && (
         <StatGrid>
@@ -213,6 +223,21 @@ tile in Customize mode. Wrap your rows in `ConfigStrip` + `ChipRow` from
 If your widget just tracks one of the user's games, use the ready-made
 `TracksGameConfig`.
 
+## Loading, empty and error states
+
+Both surfaces own the same rule, so you never have to restate it: **a fetch
+failure is only worth showing before the first data lands.** `usePolled` keeps
+the last good value, so a refresh that fails should leave a populated widget
+standing rather than blanking it out.
+
+On the board, hand `DataCard` a `source` and the raw `error` and it decides —
+error, then `skeleton` while `loading`, then your children. On the rail, wrap
+your body in `KeyedState` (`workbar/shared.tsx`) and it does the same, plus the
+"add your API key first" state that key-gated widgets share.
+
+`skeleton` is not optional polish: `StatGridSkeleton` and `RowSkeletons` are
+sized to the real content so the tile doesn't jump when data arrives.
+
 ## Authors
 
 Authors are first-class in the shop. Your name on a card or detail page is a
@@ -261,7 +286,8 @@ Body props (both surfaces): `widget` (narrowed to your type), `games`,
 
 Data comes from the Rust backend via `src/lib/ipc.ts` — Steam, Reddit, RSS,
 itch.io, system sensors and more are already there, CORS-free. A new external
-source means a new command in `src-tauri/src` plus an `ipc.ts` wrapper.
+source means a new command in `src-tauri/src` plus an `ipc.ts` wrapper. If two
+widgets will read it, give it a hook in `widgets/data.ts` as well.
 
 ## Preview
 
@@ -280,4 +306,4 @@ would be empty for a new user should carry believable sample items — see
 - [ ] `creator` points at your one author profile — check your author page
 - [ ] Registered in the union **and** the spec list in the surface's `index.tsx`
 - [ ] Preview looks right in the shop at card *and* detail sizes
-- [ ] `npm run build` is green
+- [ ] `npm run lint`, `npm run build` and `npm test` are all green

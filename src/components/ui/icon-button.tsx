@@ -8,7 +8,7 @@ type Props = Omit<ComponentProps<typeof Button>, "aria-label"> & {
 };
 
 /** A ghost icon button with a mandatory accessible label. Replaces the
- *  hand-rolled copies in the toolbar and password panel. */
+ *  hand-rolled copies across the toolbar, tab strip and panels. */
 export const IconButton = forwardRef<HTMLButtonElement, Props>(
   ({ label, className, children, ...props }, ref) => (
     <Button

@@ -41,10 +41,22 @@ pub async fn steam_stats(appid: String) -> Result<Value, String> {
         let reviews = reviews.await.ok().and_then(Result::ok).unwrap_or(Value::Null);
         let players = players.await.ok().and_then(Result::ok).unwrap_or(Value::Null);
 
+        let details = details[appid.to_string()]["data"].clone();
+        let reviews = reviews["query_summary"].clone();
+        let players = players["response"]["player_count"].clone();
+        // A partial answer is still worth caching — Steam drops `reviews` for
+        // unreleased apps, and `players` for delisted ones. But when *every*
+        // endpoint came back empty, Steam is throttling or down: return an error
+        // so `get_or_fetch` serves the last-good snapshot instead of caching this
+        // blank as fresh and blanking the widget for the whole TTL.
+        if details.is_null() && reviews.is_null() && players.is_null() {
+            return Err("Steam is unreachable".into());
+        }
+
         Ok(json!({
-            "details": details[appid.to_string()]["data"],
-            "reviews": reviews["query_summary"],
-            "players": players["response"]["player_count"],
+            "details": details,
+            "reviews": reviews,
+            "players": players,
         }))
     })
     .await

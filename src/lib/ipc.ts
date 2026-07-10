@@ -61,6 +61,44 @@ function coalesce<T>(key: string, run: () => Promise<T>): Promise<T> {
   return p;
 }
 
+/**
+ * Where a failed fire-and-forget command goes. The app installs a reporter that
+ * raises a toast; before it does (and in tests) failures still reach the
+ * console. Set once, at mount.
+ */
+let reportIpcError: (message: string) => void = () => {};
+export function setIpcErrorReporter(report: (message: string) => void): void {
+  reportIpcError = report;
+}
+
+/**
+ * Run a command we don't await, and tell the user if it fails. Use this for
+ * anything the user actually asked for — opening a download, printing, creating
+ * a tab. A dropped rejection here is a dead-end button: the click does nothing
+ * and nothing explains why.
+ *
+ * `whenItFails` is shown to the user, so write it as a sentence about their
+ * action ("Couldn't open that file"), not about the command that failed.
+ */
+export function fire(promise: Promise<unknown>, whenItFails: string): void {
+  void promise.catch((e) => {
+    console.error(whenItFails, e);
+    reportIpcError(whenItFails);
+  });
+}
+
+/**
+ * Run a command whose failure is genuinely not actionable: chrome-layout
+ * plumbing that re-runs on the next render (`setContentInsets`, `activateTab`),
+ * a teardown racing a webview that already went away, or a background read
+ * whose absence the UI already draws (an unset version line, no diagnostics).
+ * Distinct from [`fire`] so "we decided this can't be surfaced" never again
+ * looks like "we forgot". Say which one it is in a comment at the call site.
+ */
+export function silent(promise: Promise<unknown>): void {
+  void promise.catch(() => {});
+}
+
 /** A chunk of PTY output for one terminal session. */
 export type TermOutputPayload = { id: string; data: string };
 
@@ -72,13 +110,19 @@ export const ipc = {
   navigateTab: (id: string, url: string) => invoke("navigate_tab", { id, url }),
   closeTab: (id: string) => invoke("close_tab", { id }),
   activateTab: (id: string | null) => invoke("activate_tab", { id }),
-  goBack: (id: string) => invoke("tab_eval", { id, js: "history.back()" }),
-  goForward: (id: string) => invoke("tab_eval", { id, js: "history.forward()" }),
-  reload: (id: string) => invoke("tab_eval", { id, js: "location.reload()" }),
-  stop: (id: string) => invoke("tab_eval", { id, js: "window.stop()" }),
-  /** Find-in-page via Chromium's window.find; steps matches as the bar is used. */
+  /** Session-history and load control, driven through the engine's own
+   *  navigation API — not injected script, which dies on a hung page and can't
+   *  stop a load before it commits a document. */
+  goBack: (id: string) => invoke("tab_back", { id }),
+  goForward: (id: string) => invoke("tab_forward", { id }),
+  /** `hard` bypasses the HTTP cache (Ctrl+Shift+R / Ctrl+F5). */
+  reload: (id: string, hard = false) => invoke("tab_reload", { id, hard }),
+  stop: (id: string) => invoke("tab_stop", { id }),
+  /** Find-in-page via Chromium's window.find; steps matches as the bar is used.
+   *  Resolves to whether the query matched anything (there is no match *count* —
+   *  `window.find` doesn't report one). */
   tabFind: (id: string, query: string, forward: boolean, fromStart: boolean) =>
-    invoke("tab_find", { id, query, forward, fromStart }),
+    invoke<boolean>("tab_find", { id, query, forward, fromStart }),
   /** Set a tab's zoom factor (1.0 == 100%). */
   tabZoom: (id: string, factor: number) => invoke("tab_zoom", { id, factor }),
   /** Open the native (floating) Chromium DevTools window — internal fallback. */
@@ -95,9 +139,11 @@ export const ipc = {
   tabPrint: (id: string) => invoke("tab_print", { id }),
   /** Hand a deep link (mailto:, steam://, …) to the OS after the user confirms. */
   openExternal: (url: string) => invoke("open_external", { url }),
-  /** Answer a permission prompt (camera/mic/geo/notifications/clipboard). */
-  permissionRespond: (id: string, allow: boolean) =>
-    invoke("permission_respond", { id, allow }),
+  /** Answer a permission prompt (camera/mic/geo/notifications/clipboard).
+   *  `allow`/`block` are remembered per-origin by the engine; `dismiss` denies
+   *  this request only, so Escape can't permanently blacklist a site. */
+  permissionRespond: (id: string, decision: "allow" | "block" | "dismiss") =>
+    invoke("permission_respond", { id, decision }),
   /** Answer an HTTP basic-auth prompt; omit creds to cancel the load. */
   basicAuthRespond: (id: string, username: string | null, password: string | null) =>
     invoke("basic_auth_respond", { id, username, password }),

@@ -5,15 +5,13 @@ import {
   gatherDiagnostics,
   type FeedbackKind,
 } from "../lib/github";
+import { silent } from "../lib/ipc";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { MODAL_SURFACE, SCRIM_CLASS, Z_MODAL } from "@/components/ui/overlay";
-import { useEscape } from "@/hooks/use-escape";
-import { useFocusTrap } from "@/hooks/use-focus-trap";
-import { cn } from "@/lib/utils";
+import { PromptModal } from "@/components/ui/prompt";
 import { ChipGroup } from "@/components/ui/chip-group";
 
 type Props = {
@@ -40,14 +38,11 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
   const [diagnostics, setDiagnostics] = useState("");
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const titleRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    gatherDiagnostics().then(setDiagnostics).catch(() => {});
+    // No diagnostics is a thinner bug report, not a broken dialog.
+    silent(gatherDiagnostics().then(setDiagnostics));
   }, []);
-
-  useEscape(onClose);
-  useFocusTrap(panelRef, true, titleRef);
 
   const submit = () => {
     onOpen(
@@ -62,23 +57,15 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
   };
 
   return (
-    <div
-      className={cn("fixed inset-0 flex items-center justify-center", Z_MODAL, SCRIM_CLASS)}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <PromptModal
+      label="Send feedback"
+      placement="center"
+      anchor="window"
+      initialFocus={titleRef}
+      onDismiss={onClose}
+      // The feedback form is the app's largest dialog; it carries a softer corner.
+      className="w-[520px] max-w-[calc(100%-48px)] rounded-2xl p-6"
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Send feedback"
-        className={cn(
-          MODAL_SURFACE,
-          // The feedback form is the app's largest dialog; it carries a softer corner.
-          "w-[520px] max-w-[calc(100%-48px)] rounded-2xl p-6",
-        )}
-      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <Label>Feedback</Label>
@@ -151,7 +138,6 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+    </PromptModal>
   );
 }

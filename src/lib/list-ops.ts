@@ -41,3 +41,11 @@ export function moveBy<T extends WithId>(items: T[], id: string, dir: number): T
 export function patchById<T extends WithId>(items: T[], id: string, patch: Partial<T>): T[] {
   return items.map((item) => (item.id === id ? ({ ...item, ...patch } as T) : item));
 }
+
+/** How many of each `type` the list holds — what the widget shop shows on a
+ *  card to say "you already have two of these". */
+export function countByType<T extends string>(items: { type: T }[]): Map<T, number> {
+  const counts = new Map<T, number>();
+  for (const item of items) counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
+  return counts;
+}

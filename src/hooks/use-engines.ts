@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ipc, type EngineInstall } from "@/lib/ipc";
+import { ipc, silent, type EngineInstall } from "@/lib/ipc";
 import { mergeEngines } from "@/lib/unreal";
 
 /**
@@ -12,10 +12,9 @@ export function useEngines(active: boolean, manualEngines: EngineInstall[]): Eng
   const [detected, setDetected] = useState<EngineInstall[]>([]);
   useEffect(() => {
     if (!active) return;
-    ipc
-      .detectEngines()
-      .then(setDetected)
-      .catch(() => {});
+    // A failed scan is not actionable: the user's manually-linked engines still
+    // come through, and the widget's own empty state covers finding none.
+    silent(ipc.detectEngines().then(setDetected));
   }, [active]);
   return mergeEngines(detected, manualEngines);
 }

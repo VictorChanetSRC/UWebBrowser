@@ -4,7 +4,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { elapsedSince } from "./format";
-import { ipc, type BuildAction, type BuildRequest, type EngineInstall } from "./ipc";
+import { ipc, silent, type BuildAction, type BuildRequest, type EngineInstall } from "./ipc";
 import type { UnrealProject } from "./unreal";
 
 /**
@@ -362,8 +362,9 @@ export async function startBuildJob(
   };
   rateSamples = [];
   loadHistoryStats(projectName, req);
-  // Ask early so the finish notification doesn't hit a pending permission.
-  ensureNotifyPermission().catch(() => {});
+  // Ask early so the finish notification doesn't hit a pending permission. A
+  // refusal is an answer, not a failure: the build runs either way.
+  silent(ensureNotifyPermission());
   publish();
   try {
     await ipc.startBuild({ ...req, jobId: id });

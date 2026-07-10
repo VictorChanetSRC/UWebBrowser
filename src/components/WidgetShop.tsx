@@ -53,6 +53,7 @@ import { Z_MODAL } from "@/components/ui/overlay";
 import { useEscape } from "@/hooks/use-escape";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useTimedValue } from "@/hooks/use-timed-flag";
+import { countByType } from "@/lib/list-ops";
 import { cn } from "@/lib/utils";
 
 /**
@@ -760,11 +761,7 @@ export function DashboardShop({
   /** Opens a URL in a browser tab; powers author-page site links. */
   onOpenUrl?: (url: string) => void;
 }) {
-  const counts = useMemo(() => {
-    const map = new Map<DashWidgetType, number>();
-    for (const widget of widgets) map.set(widget.type, (map.get(widget.type) ?? 0) + 1);
-    return map;
-  }, [widgets]);
+  const counts = useMemo(() => countByType(widgets), [widgets]);
 
   return (
     <WidgetShop<DashWidgetType>
@@ -832,11 +829,7 @@ export function WorkbarShop({
   /** Opens a URL in a browser tab; powers author-page site links. */
   onOpenUrl?: (url: string) => void;
 }) {
-  const counts = useMemo(() => {
-    const map = new Map<WidgetType, number>();
-    for (const widget of widgets) map.set(widget.type, (map.get(widget.type) ?? 0) + 1);
-    return map;
-  }, [widgets]);
+  const counts = useMemo(() => countByType(widgets), [widgets]);
 
   return (
     <WidgetShop<WidgetType>

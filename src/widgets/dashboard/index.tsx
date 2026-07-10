@@ -1,6 +1,6 @@
 import type { Game } from "@/lib/config";
 import { createWidgetRegistry } from "../registry";
-import type { DashBodyProps, DashConfigProps, DashWidgetSpec, TileSpan } from "./define";
+import type { AnyDashWidgetSpec, DashBodyProps, DashConfigProps, TileSpan } from "./define";
 import game, { type GameWidget } from "./game";
 import revenue, { type RevenueWidget } from "./revenue";
 import build, { type BuildWidget } from "./build";
@@ -41,7 +41,7 @@ export type DashWidgetType = DashWidget["type"];
  * file; the registry views them through the loose base shape — the dispatch
  * helpers below are the only places that cross that line.
  */
-export const DASH_WIDGETS: readonly DashWidgetSpec<any>[] = [
+export const DASH_WIDGETS: readonly AnyDashWidgetSpec[] = [
   game,
   revenue,
   build,
@@ -55,7 +55,7 @@ export const DASH_WIDGETS: readonly DashWidgetSpec<any>[] = [
   github,
 ];
 
-const registry = createWidgetRegistry<DashWidgetType, DashWidgetSpec<any>>(DASH_WIDGETS);
+const registry = createWidgetRegistry<DashWidgetType, AnyDashWidgetSpec>(DASH_WIDGETS);
 
 export const DASH_SPECS = registry.specs;
 /** Every registered type, for storage validation. */

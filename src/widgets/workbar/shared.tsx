@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Game } from "@/lib/config";
+import { sourceError } from "@/lib/format";
 import { WidgetHint as SharedWidgetHint, TracksGameChips } from "../shared";
 import type { BarEditorProps, BarWidgetBase } from "./define";
 
@@ -72,6 +73,52 @@ export function SteamState<D>({
   if (!data && !error) return <>{skeleton}</>;
   if (!data) return <WidgetHint>Steam didn't answer. Retrying shortly.</WidgetHint>;
   return <>{children(data, game)}</>;
+}
+
+/**
+ * {@link SteamState}'s sibling for rail widgets gated on an API key rather than
+ * a game — the itch ones. Same precedence, same retry copy, and it wraps its own
+ * `WidgetCard` so only the content branch (which is usually a *clickable* card)
+ * is the caller's business.
+ *
+ * Precedence: no key → the source failed → still loading → content.
+ */
+export function KeyedState<D>({
+  hasKey,
+  noKey,
+  source,
+  data,
+  error,
+  skeleton,
+  children,
+}: {
+  hasKey: boolean;
+  /** Why this widget needs a key, in its own words. */
+  noKey: ReactNode;
+  /** Named in the failure line, e.g. "itch.io". */
+  source: string;
+  data: D | null | undefined;
+  error: unknown;
+  skeleton: ReactNode;
+  /** Rendered only once the data is in, so callers get it non-null. */
+  children: (data: D) => ReactNode;
+}) {
+  if (!hasKey) {
+    return (
+      <WidgetCard>
+        <WidgetHint>{noKey}</WidgetHint>
+      </WidgetCard>
+    );
+  }
+  if (!data && error) {
+    return (
+      <WidgetCard>
+        <WidgetHint>{sourceError(source, error)}</WidgetHint>
+      </WidgetCard>
+    );
+  }
+  if (!data) return <WidgetCard>{skeleton}</WidgetCard>;
+  return <>{children(data)}</>;
 }
 
 /** Row editor for widgets that track one setup game via a `gameId` field;

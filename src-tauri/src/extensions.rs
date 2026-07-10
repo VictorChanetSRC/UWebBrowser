@@ -488,10 +488,7 @@ pub async fn ext_list(app: AppHandle) -> Result<Vec<ExtInfo>, String> {
             let mut last = runtime.len();
             let mut stable = 0;
             for _ in 0..20 {
-                let _ = tauri::async_runtime::spawn_blocking(|| {
-                    std::thread::sleep(std::time::Duration::from_millis(150))
-                })
-                .await;
+                sleep_ms(150).await;
                 runtime = imp::query_installed(&app).await;
                 if runtime.len() >= folders.len() {
                     break;
@@ -570,8 +567,7 @@ async fn add_or_cleanup(app: &AppHandle, dest: PathBuf) -> Result<(), String> {
 #[tauri::command]
 pub async fn ext_install_from_store(app: AppHandle, id: String) -> Result<Vec<ExtInfo>, String> {
     let id = id.trim().to_ascii_lowercase();
-    // Web Store ids are 32 chars in the mpdecimal alphabet (a–p).
-    if id.len() != 32 || !id.bytes().all(|b| (b'a'..=b'p').contains(&b)) {
+    if !is_extension_id(&id) {
         return Err("that isn't a Chrome Web Store extension id".to_string());
     }
 
@@ -685,7 +681,7 @@ pub async fn ext_open_popup(
     // `chrome-extension:///…`, which WebView2 can't resolve and silently
     // replaces with its new-tab page (chrome-search://local-ntp).
     let id = id.trim();
-    if id.len() != 32 || !id.bytes().all(|b| (b'a'..=b'p').contains(&b)) {
+    if !is_extension_id(id) {
         return Err(format!("extension id looks wrong ({id:?})"));
     }
     let popup = popup.trim().trim_start_matches('/');
@@ -703,10 +699,7 @@ pub async fn ext_open_popup(
             if app.get_webview(EXT_POPUP_LABEL).is_none() {
                 break;
             }
-            let _ = tauri::async_runtime::spawn_blocking(|| {
-                std::thread::sleep(std::time::Duration::from_millis(10))
-            })
-            .await;
+            sleep_ms(10).await;
         }
     }
 
@@ -787,10 +780,7 @@ pub async fn ext_open_popup(
             } else {
                 130
             };
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                std::thread::sleep(std::time::Duration::from_millis(delay))
-            })
-            .await;
+            sleep_ms(delay).await;
 
             match popup_nav.url() {
                 // Landed on the extension page — force the first paint and stop.
@@ -1012,6 +1002,20 @@ fn crx_public_key(bytes: &[u8], expected_id: &str) -> Option<Vec<u8>> {
         }
         _ => None,
     }
+}
+
+/// Whether `id` is a well-formed Chromium extension id: 32 characters in the
+/// `'a'..='p'` nibble alphabet that [`id_from_public_key`] emits.
+fn is_extension_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+}
+
+/// Yield for `ms` without parking an async worker thread.
+async fn sleep_ms(ms: u64) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(ms))
+    })
+    .await;
 }
 
 /// The Chromium extension id for a DER public key: the first 16 bytes of its

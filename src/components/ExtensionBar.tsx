@@ -1,10 +1,9 @@
 import { useCallback, useState } from "react";
 import { Plus, Puzzle, Store, Trash2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ipc, type ExtInfo } from "@/lib/ipc";
+import { ipc, silent, type ExtInfo } from "@/lib/ipc";
 import { Button } from "@/components/ui/button";
-import { DismissLayer } from "@/components/ui/dismiss-layer";
-import { POPOVER_SURFACE, Z_POPOVER } from "@/components/ui/overlay";
+import { ContextMenu } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 
 const POPUP_WIDTH = 400;
@@ -38,9 +37,34 @@ export function ExtensionBar({
   onBrowseStore,
   onToast,
 }: Props) {
-  // Right-click menu for removing a pinned extension.
-  const [menu, setMenu] = useState<{ id: string; name: string; x: number; y: number } | null>(
-    null,
+  // Context menu for removing a pinned extension. `trigger` is the button it was
+  // opened from, so focus can go back there when it closes.
+  const [menu, setMenu] = useState<{
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    trigger: HTMLElement;
+  } | null>(null);
+
+  const closeMenu = useCallback(() => {
+    menu?.trigger.focus();
+    setMenu(null);
+  }, [menu]);
+
+  /** Open at the pointer, or just under the button when opened from the keyboard. */
+  const openMenu = useCallback(
+    (ext: ExtInfo, trigger: HTMLElement, at?: { x: number; y: number }) => {
+      const r = trigger.getBoundingClientRect();
+      setMenu({
+        id: ext.id,
+        name: ext.name,
+        x: at?.x ?? r.left,
+        y: at?.y ?? r.bottom + 4,
+        trigger,
+      });
+    },
+    [],
   );
 
   const removeExtension = useCallback(
@@ -48,7 +72,7 @@ export function ExtensionBar({
       setMenu(null);
       // Dismiss the popup if we're removing the one that's open.
       if (openId === ext.id) {
-        ipc.extClosePopup().catch(() => {});
+        silent(ipc.extClosePopup());
         onOpenChange(null);
       }
       try {
@@ -66,7 +90,7 @@ export function ExtensionBar({
     (ext: ExtInfo, anchor: HTMLElement) => {
       // Clicking the open extension again dismisses it.
       if (openId === ext.id) {
-        ipc.extClosePopup().catch(() => {});
+        silent(ipc.extClosePopup());
         onOpenChange(null);
         return;
       }
@@ -117,11 +141,21 @@ export function ExtensionBar({
               type="button"
               aria-label={ext.name}
               aria-pressed={openId === ext.id}
-              title={`${ext.name} (right-click to remove)`}
+              aria-haspopup="menu"
+              title={`${ext.name} (right-click, or Shift+F10, to remove)`}
               onClick={(e) => toggle(ext, e.currentTarget)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setMenu({ id: ext.id, name: ext.name, x: e.clientX, y: e.clientY });
+                openMenu(ext, e.currentTarget, { x: e.clientX, y: e.clientY });
+              }}
+              onKeyDown={(e) => {
+                // The keyboard's own context-menu gestures. Without these,
+                // uninstalling an extension needed a mouse — there is no other
+                // route to it anywhere in the app.
+                if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                  e.preventDefault();
+                  openMenu(ext, e.currentTarget);
+                }
               }}
               className={cn(
                 "flex size-7 flex-none items-center justify-center rounded-md text-ink-400 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100",
@@ -161,31 +195,22 @@ export function ExtensionBar({
       </Button>
 
       {menu && (
-        <>
-          {/* Click-away layer. */}
-          <DismissLayer onDismiss={() => setMenu(null)} />
-          <div
-            className={cn(
-              POPOVER_SURFACE,
-              // A context menu is a tighter surface than a page dropdown.
-              "fixed min-w-40 overflow-hidden rounded-md py-1",
-              Z_POPOVER,
-            )}
-            style={{ left: menu.x, top: menu.y }}
-          >
-            <button
-              type="button"
-              onClick={() => {
+        <ContextMenu
+          label={`${menu.name} options`}
+          x={menu.x}
+          y={menu.y}
+          onDismiss={closeMenu}
+          items={[
+            {
+              label: `Remove ${menu.name}`,
+              icon: <Trash2 aria-hidden />,
+              onSelect: () => {
                 const ext = extensions.find((e) => e.id === menu.id);
                 if (ext) removeExtension(ext);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink-200 transition-colors duration-[130ms] ease-brand hover:bg-ink-800"
-            >
-              <Trash2 className="size-3.5 flex-none text-ink-400" aria-hidden />
-              <span className="truncate">Remove {menu.name}</span>
-            </button>
-          </div>
-        </>
+              },
+            },
+          ]}
+        />
       )}
     </div>
   );

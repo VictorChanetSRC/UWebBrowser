@@ -1,0 +1,55 @@
+name: CI
+
+# Every push to main ships a release (see release.yml), so main has to be green
+# before it gets there. Runs on Windows because that's the only platform the
+# WebView2 code compiles for, and the only one anyone runs the browser on.
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "brand/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `build` is `tsc && vite build`, so this typechecks too.
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri

@@ -1,14 +1,12 @@
 import { PiggyBank } from "lucide-react";
-import { ipc } from "@/lib/ipc";
-import { fmtCents, shortDate, sourceError } from "@/lib/format";
+import { fmtCents, shortDate } from "@/lib/format";
 import { ITCH_CAVEAT, ITCH_NO_EARNINGS, ITCH_NO_KEY, otherCurrencies } from "@/lib/sales";
-import { usePolled } from "@/hooks/use-polled";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkline } from "@/components/ui/sparkline";
+import { SparkTrace } from "@/components/ui/sparkline";
+import { useItchEarnings } from "../data";
 import { VICTOR_CHANET } from "../types";
 import { defineDashWidget, type DashBodyProps, type TileSpan } from "./define";
-import { CardLink, DataCard, Stat, StatGrid, TileHint } from "./shared";
+import { CardLink, DataCard, Stat, StatGrid, StatGridSkeleton, TileHint } from "./shared";
 
 /** What your itch.io account has earned — lifetime from itch, days from us. */
 export type ItchRevenueWidget = {
@@ -17,19 +15,9 @@ export type ItchRevenueWidget = {
   span: TileSpan;
 };
 
-/** Matches the backend's 5-minute cache: every real fetch is also the snapshot
- *  that advances the ledger, so polling faster buys nothing but traffic. */
-const POLL_MS = 300_000;
-
 function ItchRevenueBody({ itchApiKey, active, onOpen, onEditSetup }: DashBodyProps<ItchRevenueWidget>) {
   const key = itchApiKey.trim();
-  const { data, error } = usePolled(
-    () => ipc.itchEarnings(key),
-    [key],
-    POLL_MS,
-    !!key && active,
-    `itch-earnings:${key}`,
-  );
+  const { data, error } = useItchEarnings(itchApiKey, active);
 
   if (!key) {
     return (
@@ -48,15 +36,10 @@ function ItchRevenueBody({ itchApiKey, active, onOpen, onEditSetup }: DashBodyPr
   return (
     <DataCard
       label="itch.io revenue"
-      error={!data && error ? sourceError("itch.io", error) : null}
+      source="itch.io"
+      error={error}
       loading={!data}
-      skeleton={
-        <StatGrid>
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-[78px]" />
-          ))}
-        </StatGrid>
-      }
+      skeleton={<StatGridSkeleton count={4} />}
       links={
         <CardLink onClick={() => onOpen("https://itch.io/dashboard")}>Dashboard</CardLink>
       }
@@ -72,16 +55,7 @@ function ItchRevenueBody({ itchApiKey, active, onOpen, onEditSetup }: DashBodyPr
             <Stat label="Last 30 days" value={fmtCents(data.last30Cents, currency)} />
           </StatGrid>
 
-          {data.spark && data.spark.length > 1 && (
-            <Sparkline
-              values={data.spark}
-              capacity={data.spark.length}
-              // Fixed 0..max: a day with no sales should sit on the floor, not
-              // be rescaled into looking like one.
-              max={Math.max(...data.spark, 1)}
-              className="h-10"
-            />
-          )}
+          {data.spark && <SparkTrace values={data.spark} className="h-10" />}
 
           <p className="text-[12.5px] leading-[1.5] text-ink-500">
             {ITCH_CAVEAT}{" "}

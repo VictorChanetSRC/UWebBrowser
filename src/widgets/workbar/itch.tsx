@@ -1,68 +1,54 @@
 import { Store } from "lucide-react";
-import { ipc } from "@/lib/ipc";
-import { fmtNumber, sourceError } from "@/lib/format";
-import { usePolled } from "@/hooks/use-polled";
+import { fmtNumber } from "@/lib/format";
+import { useItchGames } from "../data";
 import { VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
-import { RowSkeletons, WidgetCard, WidgetHint } from "./shared";
+import { KeyedState, RowSkeletons, WidgetCard, WidgetHint } from "./shared";
 
 /** Account-wide itch.io totals, riding along in the rail. */
 export type ItchWidget = { id: string; type: "itch" };
 
 function ItchBody({ itchApiKey, active, onOpen }: BarBodyProps<ItchWidget>) {
-  const key = itchApiKey.trim();
-  // Aggregate counts move slowly; refresh every 5 minutes.
-  const { data, error } = usePolled(
-    () => ipc.itchGames(key),
-    [key],
-    300_000,
-    !!key && active,
-    `itch:${key}`,
-  );
-
-  if (!key) {
-    return (
-      <WidgetCard>
-        <WidgetHint>Add your itch.io API key in the dashboard setup.</WidgetHint>
-      </WidgetCard>
-    );
-  }
-  if (!data && error) {
-    return (
-      <WidgetCard>
-        <WidgetHint>{sourceError("itch.io", error)}</WidgetHint>
-      </WidgetCard>
-    );
-  }
-  if (!data) {
-    return (
-      <WidgetCard>
-        <RowSkeletons count={3} className="h-4 rounded-md" />
-      </WidgetCard>
-    );
-  }
-
-  const totals = data.reduce(
-    (acc, game) => ({
-      views: acc.views + (game.views_count ?? 0),
-      downloads: acc.downloads + (game.downloads_count ?? 0),
-      purchases: acc.purchases + (game.purchases_count ?? 0),
-    }),
-    { views: 0, downloads: 0, purchases: 0 },
-  );
+  const { data, error } = useItchGames(itchApiKey, active);
 
   return (
-    <WidgetCard onClick={() => onOpen("https://itch.io/dashboard")} title="Open itch.io dashboard">
-      {data.length === 0 ? (
-        <WidgetHint>No games on this account yet.</WidgetHint>
-      ) : (
-        <>
-          <ItchRow name="Views" value={totals.views} />
-          <ItchRow name="Downloads" value={totals.downloads} />
-          <ItchRow name="Purchases" value={totals.purchases} />
-        </>
-      )}
-    </WidgetCard>
+    <KeyedState
+      hasKey={!!itchApiKey.trim()}
+      // Not ITCH_NO_KEY: that one talks about earnings, and this widget shows
+      // views, downloads and purchases.
+      noKey="Add your itch.io API key in the dashboard setup."
+      source="itch.io"
+      data={data}
+      error={error}
+      skeleton={<RowSkeletons count={3} className="h-4 rounded-md" />}
+    >
+      {(games) => {
+        const totals = games.reduce(
+          (acc, game) => ({
+            views: acc.views + (game.views_count ?? 0),
+            downloads: acc.downloads + (game.downloads_count ?? 0),
+            purchases: acc.purchases + (game.purchases_count ?? 0),
+          }),
+          { views: 0, downloads: 0, purchases: 0 },
+        );
+        return (
+          <WidgetCard
+            onClick={() => onOpen("https://itch.io/dashboard")}
+            title="Open itch.io dashboard"
+          >
+            {games.length === 0 ? (
+              <WidgetHint>No games on this account yet.</WidgetHint>
+            ) : (
+              <>
+                <ItchRow name="Views" value={totals.views} />
+                <ItchRow name="Downloads" value={totals.downloads} />
+                <ItchRow name="Purchases" value={totals.purchases} />
+              </>
+            )}
+          </WidgetCard>
+        );
+      }}
+    </KeyedState>
   );
 }
 

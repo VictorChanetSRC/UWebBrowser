@@ -1,14 +1,19 @@
 import { PanelBottom, PanelRight, X } from "lucide-react";
-import { useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Z_CONTENT } from "@/components/ui/overlay";
-import { cn } from "@/lib/utils";
+import { clamp, cn } from "@/lib/utils";
 
 /** Thickness (px) of the control strip. Mirrors `DEVTOOLS_STRIP` in tabs.rs —
  *  the backend reserves exactly this band (the native inspector sits past it),
  *  so the two must stay in step. */
 export const DEVTOOLS_STRIP = 30;
 
-const clampFrac = (f: number) => Math.min(0.85, Math.max(0.15, f));
+const MIN_FRAC = 0.15;
+const MAX_FRAC = 0.85;
+/** One arrow-key press. Coarse enough to cross the range in a few taps. */
+const KEY_STEP = 0.05;
+
+const clampFrac = (f: number) => clamp(f, MIN_FRAC, MAX_FRAC);
 
 type Dock = "bottom" | "right";
 
@@ -70,6 +75,22 @@ export function DevtoolsDock({
     onResizeEnd(fractionAt(e));
   };
 
+  // Sizing the panel was pointer-only; a splitter that reports `role="separator"`
+  // should also answer the arrow keys. Home/End jump to the extremes.
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const grow = dock === "bottom" ? "ArrowUp" : "ArrowLeft";
+    const shrink = dock === "bottom" ? "ArrowDown" : "ArrowRight";
+    let next: number | null = null;
+    if (e.key === grow) next = size + KEY_STEP;
+    else if (e.key === shrink) next = size - KEY_STEP;
+    else if (e.key === "Home") next = MIN_FRAC;
+    else if (e.key === "End") next = MAX_FRAC;
+    if (next === null) return;
+    e.preventDefault();
+    // Commit straight away: there's no drag in flight to end.
+    onResizeEnd(clampFrac(next));
+  };
+
   const bottom = dock === "bottom";
   const stripStyle = bottom
     ? { top: `${(1 - size) * 100}%`, left: 0, right: 0, height: DEVTOOLS_STRIP }
@@ -90,8 +111,13 @@ export function DevtoolsDock({
     >
       <div
         role="separator"
+        tabIndex={0}
         aria-orientation={bottom ? "horizontal" : "vertical"}
         aria-label="Resize developer tools"
+        aria-valuenow={Math.round(size * 100)}
+        aria-valuemin={Math.round(MIN_FRAC * 100)}
+        aria-valuemax={Math.round(MAX_FRAC * 100)}
+        title="Drag, or focus and use the arrow keys, to resize"
         className={`pointer-events-auto absolute flex touch-none select-none bg-ink-900 ${
           bottom
             ? "cursor-row-resize flex-row items-center gap-2 border-t border-ink-700 px-2"
@@ -102,6 +128,7 @@ export function DevtoolsDock({
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
+        onKeyDown={onKeyDown}
       >
         {/* Drag affordance. */}
         <div

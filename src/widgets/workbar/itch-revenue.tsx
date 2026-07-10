@@ -1,90 +1,71 @@
 import { Wallet } from "lucide-react";
-import { ipc } from "@/lib/ipc";
-import { fmtCents, shortDate, sourceError } from "@/lib/format";
+import { fmtCents, shortDate } from "@/lib/format";
 import { ITCH_NO_EARNINGS, ITCH_NO_KEY } from "@/lib/sales";
-import { usePolled } from "@/hooks/use-polled";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkline } from "@/components/ui/sparkline";
+import { SparkTrace } from "@/components/ui/sparkline";
+import { useItchEarnings } from "../data";
 import { VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
-import { WidgetCard, WidgetHint } from "./shared";
+import { KeyedState, WidgetCard, WidgetHint } from "./shared";
 
 /** itch.io earnings in the rail: today's take over the lifetime total. */
 export type ItchRevenueWidget = { id: string; type: "itch-revenue" };
 
-const POLL_MS = 300_000;
-
 function ItchRevenueBody({ itchApiKey, active, onOpen }: BarBodyProps<ItchRevenueWidget>) {
-  const key = itchApiKey.trim();
-  const { data, error } = usePolled(
-    () => ipc.itchEarnings(key),
-    [key],
-    POLL_MS,
-    !!key && active,
-    `itch-earnings:${key}`,
-  );
-
-  if (!key) {
-    return (
-      <WidgetCard>
-        <WidgetHint>{ITCH_NO_KEY}</WidgetHint>
-      </WidgetCard>
-    );
-  }
-  if (!data && error) {
-    return (
-      <WidgetCard>
-        <WidgetHint>{sourceError("itch.io", error)}</WidgetHint>
-      </WidgetCard>
-    );
-  }
-  if (!data) {
-    return (
-      <WidgetCard>
-        <Skeleton className="h-7 w-24" />
-        <Skeleton className="h-6 w-full rounded-[4px]" />
-      </WidgetCard>
-    );
-  }
-
-  const currency = data.currency;
+  const { data, error } = useItchEarnings(itchApiKey, active);
 
   return (
-    <WidgetCard onClick={() => onOpen("https://itch.io/dashboard")} title="Open itch.io dashboard">
-      {!data.hasData ? (
-        <WidgetHint>{ITCH_NO_EARNINGS}</WidgetHint>
-      ) : (
+    <KeyedState
+      hasKey={!!itchApiKey.trim()}
+      noKey={ITCH_NO_KEY}
+      source="itch.io"
+      data={data}
+      error={error}
+      skeleton={
         <>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em]">
-              {fmtCents(data.todayCents, currency)}
-            </span>
-            <Label size="micro">Today</Label>
-          </div>
-
-          {data.spark && data.spark.length > 1 && (
-            <Sparkline
-              values={data.spark}
-              capacity={data.spark.length}
-              max={Math.max(...data.spark, 1)}
-              className="h-6"
-            />
-          )}
-
-          <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-400">
-            <span className="truncate">Lifetime</span>
-            <span className="flex-none">{fmtCents(data.lifetimeCents, currency)}</span>
-          </div>
-
-          {data.trackingSince > 0 && (
-            <div className="border-t border-border pt-2 text-[11px] text-ink-400">
-              <span className="truncate">Measured since {shortDate(data.trackingSince)}</span>
-            </div>
-          )}
+          <Skeleton className="h-7 w-24" />
+          <Skeleton className="h-6 w-full rounded-[4px]" />
         </>
+      }
+    >
+      {(earnings) => (
+        <WidgetCard
+          onClick={() => onOpen("https://itch.io/dashboard")}
+          title="Open itch.io dashboard"
+        >
+          {!earnings.hasData ? (
+            <WidgetHint>{ITCH_NO_EARNINGS}</WidgetHint>
+          ) : (
+            <>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em]">
+                  {fmtCents(earnings.todayCents, earnings.currency)}
+                </span>
+                <Label size="micro">Today</Label>
+              </div>
+
+              {earnings.spark && <SparkTrace values={earnings.spark} className="h-6" />}
+
+              <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-400">
+                <span className="truncate">Lifetime</span>
+                <span className="flex-none">
+                  {fmtCents(earnings.lifetimeCents, earnings.currency)}
+                </span>
+              </div>
+
+              {earnings.trackingSince > 0 && (
+                <div className="border-t border-border pt-2 text-[11px] text-ink-400">
+                  <span className="truncate">
+                    Measured since {shortDate(earnings.trackingSince)}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </WidgetCard>
       )}
-    </WidgetCard>
+    </KeyedState>
   );
 }
 

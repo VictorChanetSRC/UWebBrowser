@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { Ban, Download, FileDown, FolderOpen, Trash2, TriangleAlert, X } from "lucide-react";
-import { ipc } from "../lib/ipc";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Ban,
+  Download,
+  FileDown,
+  FolderOpen,
+  RotateCcw,
+  Trash2,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import { fire, ipc } from "../lib/ipc";
 import {
   activeProgress,
   applyDownloadEvent,
@@ -17,6 +26,7 @@ import { IconButton } from "./ui/icon-button";
 import { POPOVER_SURFACE, Z_POPOVER } from "./ui/overlay";
 import { Spinner } from "./ui/spinner";
 import { useEscape } from "../hooks/use-escape";
+import { useFocusTrap } from "../hooks/use-focus-trap";
 import { useTimedFlag } from "../hooks/use-timed-flag";
 import { cn } from "../lib/utils";
 
@@ -34,14 +44,18 @@ import { cn } from "../lib/utils";
 export function Downloads({
   onPanelOpenChange,
   openSignal = 0,
+  onRetry,
 }: {
   onPanelOpenChange: (open: boolean) => void;
   /** Bumped by the app to toggle the panel from the Ctrl+J shortcut. */
   openSignal?: number;
+  /** Re-request a download's source URL, the way re-clicking the link would. */
+  onRetry: (url: string) => void;
 }) {
   const [items, setItems] = useState<DownloadRec[]>(loadDownloads);
   const [open, setOpen] = useState(false);
   const [pulse, firePulse] = useTimedFlag(1200);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Fold incoming download events into the list. A separate listener from the
   // app's — each `listen` is independent, so this stays fully local.
@@ -77,12 +91,24 @@ export function Downloads({
     setOpen(false);
   }, open);
 
+  // Ctrl+J opens the panel without touching the pointer, so focus has to follow
+  // it in — otherwise the panel announces itself as a dialog while the keyboard
+  // is still out in the toolbar behind it. Restores focus to the button on close.
+  useFocusTrap(panelRef, open);
+
   const active = useMemo(() => countActive(items), [items]);
   const progress = useMemo(() => activeProgress(items), [items]);
 
   const remove = (id: string) => setItems((prev) => prev.filter((d) => d.id !== id));
   const clearFinished = () => setItems((prev) => prev.filter((d) => d.state === "active"));
   const mostRecent = items[0];
+
+  // Re-request the file, and drop the dead row — the retry arrives as a fresh
+  // download with its own id, so keeping the old one would double the list.
+  const retry = (item: DownloadRec) => {
+    onRetry(item.url);
+    remove(item.id);
+  };
 
   // Nothing downloaded yet → no button at all (Chrome shows it after the first).
   if (items.length === 0) return null;
@@ -98,7 +124,8 @@ export function Downloads({
             : "Downloads"
         }
         aria-expanded={open}
-        title="Downloads"
+        aria-haspopup="dialog"
+        title="Downloads · Ctrl+J"
         className={cn(
           "relative flex size-8 items-center justify-center rounded-full text-ink-300 transition-colors duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100",
           open && "bg-ink-800 text-ink-100",
@@ -120,12 +147,14 @@ export function Downloads({
               open (see onPanelOpenChange), so this backdrop is reachable. */}
           <DismissLayer onDismiss={() => setOpen(false)} />
           <div
+            ref={panelRef}
             className={cn(
               "absolute right-0 top-[calc(100%+8px)] w-[360px] overflow-hidden",
               Z_POPOVER,
               POPOVER_SURFACE,
             )}
             role="dialog"
+            aria-modal="true"
             aria-label="Downloads"
           >
             <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
@@ -148,7 +177,12 @@ export function Downloads({
 
             <div className="max-h-[min(60vh,420px)] overflow-y-auto py-1">
               {items.map((d) => (
-                <DownloadRow key={d.id} item={d} onRemove={() => remove(d.id)} />
+                <DownloadRow
+                  key={d.id}
+                  item={d}
+                  onRemove={() => remove(d.id)}
+                  onRetry={() => retry(d)}
+                />
               ))}
             </div>
 
@@ -157,7 +191,12 @@ export function Downloads({
                 <Button
                   variant="ghost"
                   size="none"
-                  onClick={() => ipc.downloadShow(mostRecent.path).catch(() => {})}
+                  onClick={() =>
+                    fire(
+                      ipc.downloadShow(mostRecent.path),
+                      "Couldn’t open the downloads folder",
+                    )
+                  }
                   className="gap-1.5 rounded px-1.5 py-0.5 text-[11.5px] font-normal"
                 >
                   <FolderOpen className="size-3.5" aria-hidden />
@@ -201,8 +240,19 @@ function Ring({ progress }: { progress: number | null }) {
   );
 }
 
-function DownloadRow({ item, onRemove }: { item: DownloadRec; onRemove: () => void }) {
+function DownloadRow({
+  item,
+  onRemove,
+  onRetry,
+}: {
+  item: DownloadRec;
+  onRemove: () => void;
+  onRetry: () => void;
+}) {
   const active = item.state === "active";
+  // Failed, canceled, or interrupted by quitting mid-transfer. The source URL is
+  // on the record, so the row doesn't have to be a dead end.
+  const retryable = !active && item.state !== "done" && !!item.url;
   const frac = item.total > 0 ? Math.min(1, item.received / item.total) : null;
 
   const status = active
@@ -216,7 +266,10 @@ function DownloadRow({ item, onRemove }: { item: DownloadRec; onRemove: () => vo
         : "Failed";
 
   const openFile = () => {
-    if (item.state === "done") ipc.downloadOpen(item.path).catch(() => {});
+    if (item.state !== "done") return;
+    // The file may have been moved or deleted since it landed; the backend says
+    // so, and the user should hear it rather than watch the click do nothing.
+    fire(ipc.downloadOpen(item.path), `Couldn’t open ${item.name}`);
   };
 
   return (
@@ -270,17 +323,26 @@ function DownloadRow({ item, onRemove }: { item: DownloadRec; onRemove: () => vo
           <IconButton
             label="Cancel download"
             className="size-7"
-            onClick={() => ipc.downloadCancel(item.id).catch(() => {})}
+            onClick={() => fire(ipc.downloadCancel(item.id), "Couldn’t cancel that download")}
           >
             <X className="size-3.5" aria-hidden />
           </IconButton>
         ) : (
           <>
+            {retryable && (
+              <IconButton
+                label={`Retry ${item.name}`}
+                className="size-7 opacity-0 group-hover:opacity-100"
+                onClick={onRetry}
+              >
+                <RotateCcw className="size-3.5" aria-hidden />
+              </IconButton>
+            )}
             {item.state === "done" && (
               <IconButton
                 label="Show in folder"
                 className="size-7 opacity-0 group-hover:opacity-100"
-                onClick={() => ipc.downloadShow(item.path).catch(() => {})}
+                onClick={() => fire(ipc.downloadShow(item.path), `Couldn’t find ${item.name}`)}
               >
                 <FolderOpen className="size-3.5" aria-hidden />
               </IconButton>

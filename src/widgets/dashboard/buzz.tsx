@@ -1,7 +1,7 @@
 import { MessagesSquare } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { watchLinks } from "@/lib/engines";
-import { ago, sourceError } from "@/lib/format";
+import { ago } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { Button } from "@/components/ui/button";
 import { VICTOR_CHANET } from "../types";
@@ -40,7 +40,8 @@ function BuzzBody({ widget, games, active, onOpen }: DashBodyProps<BuzzWidget>) 
   return (
     <DataCard
       label="Community buzz"
-      error={!!name && !posts && error ? sourceError("Reddit", error) : null}
+      source="Reddit"
+      error={error}
       loading={!!name && !posts}
       skeleton={<RowSkeletons count={4} />}
       links={

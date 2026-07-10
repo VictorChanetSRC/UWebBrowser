@@ -12,7 +12,10 @@ export const DEFAULT_SHARE_PCT = 70;
 
 export const SHARE_OPTIONS = [70, 75, 80, 100] as const;
 
-/** What a share percentage is called on a chip and in the tile's footer. */
+/** What a share percentage is called on a chip and in a surface's footer. At
+ *  100% there is no "share" — it's the whole net figure, and saying "100% share"
+ *  invites the reader to wonder what the other 0% is. Every surface must use
+ *  this: the rail used to spell the string itself and disagreed with the tile. */
 export const shareLabel = (pct: number): string => (pct === 100 ? "Net sales" : `${pct}% share`);
 
 /** Your slice of a net-sales figure. */

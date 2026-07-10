@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { clearHistory, historyCount } from "../lib/history";
-import { ipc } from "../lib/ipc";
+import { ipc, silent } from "../lib/ipc";
+import { useGithubStars } from "@/hooks/use-github-stars";
+import { useTimedFlag } from "@/hooks/use-timed-flag";
 import {
   searchEngines,
   type BrowserSettings,
@@ -41,18 +43,18 @@ export function Settings({
   const [visitCount, setVisitCount] = useState(historyCount);
   const [clearState, setClearState] = useState<ClearState>("idle");
   const [clearError, setClearError] = useState("");
-  const [historyCleared, setHistoryCleared] = useState(false);
-  const [pinsReset, setPinsReset] = useState(false);
+  // Transient "done" flags. `useTimedFlag` owns the timer (and clears it on
+  // unmount); only the clear-data machine below needs the manual `settle`, since
+  // it has working/done/error states a boolean can't express.
+  const [historyCleared, flashHistoryCleared] = useTimedFlag(2600);
+  const [pinsReset, flashPinsReset] = useTimedFlag(2600);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [stars, setStars] = useState<number | null>(null);
+  const stars = useGithubStars();
   const resetTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    getVersion().then(setVersion).catch(() => {});
-    ipc
-      .githubRepoStats()
-      .then((repoStats) => setStars(repoStats.stars))
-      .catch(() => {});
+    // The version line just stays blank if this fails; nothing to tell anyone.
+    silent(getVersion().then(setVersion));
     return () => window.clearTimeout(resetTimer.current);
   }, []);
 
@@ -86,8 +88,7 @@ export function Settings({
   const handleClearHistory = () => {
     clearHistory();
     setVisitCount(0);
-    setHistoryCleared(true);
-    settle(() => setHistoryCleared(false));
+    flashHistoryCleared();
   };
 
   const setEngine = (key: SearchEngineKey) => {
@@ -149,8 +150,8 @@ export function Settings({
               title="Clear browsing history"
               description={
                 historyCleared
-                  ? "History cleared."
-                  : `${visitCount} ${visitCount === 1 ? "page" : "pages"} remembered. Browse and search them on the History page (Ctrl+H).`
+                  ? "History cleared. You’re still signed in, and the cache is untouched — use Clear site data for those."
+                  : `${visitCount} ${visitCount === 1 ? "page" : "pages"} remembered. Browse and search them on the History page (Ctrl+H). This doesn’t sign you out or clear the cache.`
               }
             >
               <ConfirmButton
@@ -188,8 +189,7 @@ export function Settings({
                 className="flex-none"
                 onConfirm={() => {
                   onResetPins();
-                  setPinsReset(true);
-                  settle(() => setPinsReset(false));
+                  flashPinsReset();
                 }}
               >
                 Reset work bar

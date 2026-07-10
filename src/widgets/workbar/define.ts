@@ -73,6 +73,16 @@ export type BarWidgetSpec<W extends BarWidgetBase = BarWidgetBase> = {
   preview: W;
 };
 
+/**
+ * A spec for *some* widget, whose type is no longer known. The registry holds
+ * one list of differently-typed specs, and `create`/`title`/`Body` all consume
+ * `W`, so no honest supertype exists: `BarWidgetSpec<BarWidgetBase>` would
+ * reject every real spec. Each spec is precisely typed at its definition
+ * (`defineBarWidget` below); this is the shelf they sit on afterwards.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyBarWidgetSpec = BarWidgetSpec<any>;
+
 /** Identity helper so a spec infers its widget type from the fields. */
 export const defineBarWidget = <W extends BarWidgetBase>(
   spec: BarWidgetSpec<W>,

@@ -1,11 +1,23 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Minus, Plus, Puzzle, Square, X } from "lucide-react";
+import {
+  ArrowRightFromLine,
+  CircleX,
+  Copy,
+  CopyPlus,
+  Minus,
+  Plus,
+  Puzzle,
+  RotateCcw,
+  Square,
+  X,
+} from "lucide-react";
 import type { Tab } from "../App";
 import { Button } from "@/components/ui/button";
+import { ContextMenu } from "@/components/ui/context-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { Favicon } from "@/components/ui/favicon";
-import { cn } from "@/lib/utils";
+import { clamp, cn } from "@/lib/utils";
 
 /**
  * The UWebBrowser mark: a globe with a live marker. Geometry transcribed
@@ -33,6 +45,10 @@ type Props = {
   onReorder: (from: number, to: number) => void;
   onToggleExtensions: () => void;
   extensionsActive: boolean;
+  /** Open a copy of a tab, right of it. */
+  onDuplicate: (tab: Tab) => void;
+  /** Ctrl+Shift+T, offered in the tab menu too. */
+  onReopenClosed: () => void;
 };
 
 const windowControl =
@@ -45,8 +61,6 @@ const TAB_MIN_WIDTH = 64;
 const TAB_CLOSE_MIN = 92;
 const NEW_TAB_SPACE = 28 + TAB_GAP;
 
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-
 function TitleBarImpl({
   tabs,
   activeId,
@@ -56,6 +70,8 @@ function TitleBarImpl({
   onReorder,
   onToggleExtensions,
   extensionsActive,
+  onDuplicate,
+  onReopenClosed,
 }: Props) {
   const appWindow = getCurrentWindow();
   const [maximized, setMaximized] = useState(false);
@@ -72,6 +88,28 @@ function TitleBarImpl({
   );
   const tabEls = useRef(new Map<string, HTMLDivElement>());
   const lastLeft = useRef(new Map<string, number>());
+
+  // Per-tab context menu. `trigger` is the tab element, so focus returns to it.
+  const [menu, setMenu] = useState<{
+    tab: Tab;
+    index: number;
+    x: number;
+    y: number;
+    trigger: HTMLElement;
+  } | null>(null);
+
+  const closeMenu = useCallback(() => {
+    menu?.trigger.focus();
+    setMenu(null);
+  }, [menu]);
+
+  const openMenu = useCallback(
+    (tab: Tab, index: number, trigger: HTMLElement, at?: { x: number; y: number }) => {
+      const r = trigger.getBoundingClientRect();
+      setMenu({ tab, index, x: at?.x ?? r.left, y: at?.y ?? r.bottom + 4, trigger });
+    },
+    [],
+  );
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -228,9 +266,24 @@ function TitleBarImpl({
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   onSelect(tab);
+                } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                  e.preventDefault();
+                  openMenu(tab, index, e.currentTarget);
                 } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
                   e.preventDefault();
                   const dir = e.key === "ArrowRight" ? 1 : -1;
+                  // Ctrl+Shift+Arrow *moves* the tab; the drag reorder was
+                  // otherwise pointer-only. Plain arrows still move selection.
+                  if (e.ctrlKey && e.shiftKey) {
+                    const to = index + dir;
+                    if (to >= 0 && to < tabs.length) {
+                      onReorder(index, to);
+                      // The element keeps its identity across the reorder, so
+                      // focus follows the tab rather than the slot.
+                      requestAnimationFrame(() => tabEls.current.get(tab.id)?.focus());
+                    }
+                    return;
+                  }
                   const next = tabs[(index + dir + tabs.length) % tabs.length];
                   if (next) {
                     onSelect(next);
@@ -240,6 +293,10 @@ function TitleBarImpl({
               }}
               onAuxClick={(e) => {
                 if (e.button === 1) onClose(tab.id);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openMenu(tab, index, e.currentTarget, { x: e.clientX, y: e.clientY });
               }}
               title={tab.title}
             >
@@ -291,6 +348,53 @@ function TitleBarImpl({
           <Plus className="size-3" aria-hidden />
         </Button>
       </div>
+
+      {menu && (
+        <ContextMenu
+          label={`${menu.tab.title || "New tab"} options`}
+          x={menu.x}
+          y={menu.y}
+          onDismiss={closeMenu}
+          items={[
+            {
+              label: "Duplicate",
+              icon: <CopyPlus aria-hidden />,
+              onSelect: () => onDuplicate(menu.tab),
+            },
+            {
+              label: "Reopen closed tab",
+              icon: <RotateCcw aria-hidden />,
+              onSelect: onReopenClosed,
+            },
+            {
+              label: "Close",
+              icon: <X aria-hidden />,
+              separated: true,
+              onSelect: () => onClose(menu.tab.id),
+            },
+            {
+              label: "Close other tabs",
+              icon: <CircleX aria-hidden />,
+              disabled: tabs.length < 2,
+              onSelect: () =>
+                tabs
+                  .filter((t) => t.id !== menu.tab.id)
+                  .forEach((t) => onClose(t.id)),
+            },
+            {
+              label: "Close tabs to the right",
+              icon: <ArrowRightFromLine aria-hidden />,
+              disabled: menu.index >= tabs.length - 1,
+              // Right-to-left, so each close doesn't shift the ones still to go.
+              onSelect: () =>
+                tabs
+                  .slice(menu.index + 1)
+                  .reverse()
+                  .forEach((t) => onClose(t.id)),
+            },
+          ]}
+        />
+      )}
 
       <div className="flex flex-none items-center px-1.5" data-tauri-drag-region>
         <Button

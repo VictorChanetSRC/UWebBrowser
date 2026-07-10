@@ -293,14 +293,9 @@ pub async fn open_uproject(engine_path: Option<String>, uproject: String) -> Res
             }
         }
     }
-    #[cfg(windows)]
-    let mut cmd = Command::new("explorer");
-    #[cfg(target_os = "macos")]
-    let mut cmd = Command::new("open");
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    let mut cmd = Command::new("xdg-open");
-    cmd.arg(&uproject).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    // No engine binary given (or it's gone): fall back to the OS association
+    // for .uproject, which the Epic launcher registers.
+    crate::os::open_path(&uproject)
 }
 
 #[derive(Deserialize)]

@@ -6,9 +6,17 @@ import type { Tab } from "../App";
 import { loadJson, saveJson } from "./storage";
 
 const KEY = "uwb.session";
+const CLOSED_KEY = "uwb.session.closed";
+/** How many closed tabs Ctrl+Shift+T can walk back through. Chrome keeps ~25;
+ *  ten is plenty for a browser you don't live in all day, and keeps the list
+ *  (which holds URLs) small. */
+const MAX_CLOSED = 10;
 
 type SavedTab = Pick<Tab, "id" | "kind" | "url" | "title">;
 type SavedSession = { tabs: SavedTab[]; activeId: string };
+
+/** A tab the user closed, with enough to put it back where it was. */
+export type ClosedTab = { url: string; title: string; kind: Tab["kind"]; index: number };
 
 export function saveSession(tabs: Tab[], activeId: string) {
   const session: SavedSession = {
@@ -49,4 +57,26 @@ export function loadSession(): { tabs: Tab[]; activeId: string } | null {
     },
     () => null,
   );
+}
+
+/**
+ * The recently-closed stack behind Ctrl+Shift+T. Persisted, so reopening
+ * survives a restart the way it does in Chrome, and it records internal pages
+ * (History, Settings, …) too — closing one used to be un-undoable.
+ */
+export function loadClosedTabs(): ClosedTab[] {
+  return loadJson<ClosedTab[]>(
+    [CLOSED_KEY],
+    (raw) =>
+      Array.isArray(raw)
+        ? (raw as ClosedTab[]).filter(
+            (t) => t && typeof t.url === "string" && (t.kind === "web" || t.kind === "home"),
+          )
+        : null,
+    () => [],
+  );
+}
+
+export function saveClosedTabs(closed: ClosedTab[]) {
+  saveJson(CLOSED_KEY, closed.slice(-MAX_CLOSED));
 }

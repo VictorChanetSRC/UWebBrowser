@@ -1,15 +1,17 @@
 import type { ReactNode } from "react";
+import { sourceError } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { LiveDot } from "@/components/ui/live-dot";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TracksGameChips } from "../shared";
 import type { DashConfigProps, DashWidgetBase } from "./define";
 
 // Shared helpers re-exported so dashboard widgets keep one local import point.
 export { trackedAppId, trackedGame } from "../types";
-export { RowSkeletons, ChipRow } from "../shared";
+export { RowSkeletons, ChipRow, ShareChips } from "../shared";
 // The dashboard's empty-state one-liner is the roomier "tile" size of WidgetHint.
 export { WidgetHint as TileHint } from "../shared";
 
@@ -24,10 +26,17 @@ export { WidgetHint as TileHint } from "../shared";
  * error / skeleton / content in that order of precedence. Tiles live on a
  * fixed bento rhythm, so overflow scrolls inside the card instead of
  * stretching the row.
+ *
+ * The card owns one rule that every tile used to restate: **a fetch failure is
+ * only worth showing before the first data lands.** Once a tile has content, a
+ * failed refresh must leave it standing rather than blanking it — `usePolled`
+ * keeps the last good value for exactly that reason. Pass the raw `error` and
+ * the `source` it came from; the card decides.
  */
 export function DataCard({
   label,
   links,
+  source,
   error,
   loading,
   skeleton,
@@ -35,11 +44,16 @@ export function DataCard({
 }: {
   label: ReactNode;
   links?: ReactNode;
-  error?: string | null | false;
+  /** Named in the failure line, e.g. "Steam". Required to render an `error`. */
+  source?: string;
+  /** Whatever the fetch rejected with; shown only while `loading`. */
+  error?: unknown;
+  /** True until the tile has data of its own to show. */
   loading?: boolean;
   skeleton?: ReactNode;
   children: ReactNode;
 }) {
+  const failure = loading && source && error != null ? sourceError(source, error) : null;
   return (
     <Card className="h-full min-w-0 overflow-hidden rounded-[18px]">
       <CardHeader className="flex-none">
@@ -47,7 +61,13 @@ export function DataCard({
         {links && <div className="flex gap-4">{links}</div>}
       </CardHeader>
       <div className="-mr-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-3">
-        {error ? <p className="text-ink-400">{error}</p> : loading ? skeleton : children}
+        {failure ? (
+          <p className="text-ink-400">{failure}</p>
+        ) : loading ? (
+          skeleton
+        ) : (
+          children
+        )}
       </div>
     </Card>
   );
@@ -98,6 +118,18 @@ export function FeedRow({
 export function StatGrid({ children }: { children: ReactNode }) {
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">{children}</div>
+  );
+}
+
+/** The loading state of a {@link StatGrid}: `count` tiles at a real Stat's
+ *  height, so the card doesn't jump when the data lands. */
+export function StatGridSkeleton({ count }: { count: number }) {
+  return (
+    <StatGrid>
+      {Array.from({ length: count }, (_, i) => (
+        <Skeleton key={i} className="h-[78px]" />
+      ))}
+    </StatGrid>
   );
 }
 

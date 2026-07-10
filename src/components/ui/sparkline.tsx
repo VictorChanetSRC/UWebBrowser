@@ -74,3 +74,23 @@ export function Sparkline({
   });
   return <Trace points={points} height={h} className={cn("h-6", className)} />;
 }
+
+/**
+ * A {@link Sparkline} over a complete daily series: the whole array is the
+ * window, and the scale runs from zero to the largest value (never below 1, so a
+ * run of zero days sits flat on the floor instead of dividing by zero).
+ *
+ * The four revenue surfaces each open-coded exactly this. Renders nothing for a
+ * single point — one day is not a trend.
+ */
+export function SparkTrace({ values, className }: { values: number[]; className?: string }) {
+  if (values.length < 2) return null;
+  return (
+    <Sparkline
+      values={values}
+      capacity={values.length}
+      max={Math.max(...values, 1)}
+      className={className}
+    />
+  );
+}

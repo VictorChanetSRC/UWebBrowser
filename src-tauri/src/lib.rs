@@ -7,7 +7,9 @@ mod github;
 mod history;
 mod http;
 mod itch;
+mod ledger;
 mod news;
+mod os;
 mod sales;
 mod stats;
 mod sysmon;
@@ -55,7 +57,10 @@ pub fn run() {
             tabs::navigate_tab,
             tabs::close_tab,
             tabs::activate_tab,
-            tabs::tab_eval,
+            tabs::tab_back,
+            tabs::tab_forward,
+            tabs::tab_reload,
+            tabs::tab_stop,
             tabs::tab_find,
             tabs::tab_zoom,
             tabs::tab_devtools,

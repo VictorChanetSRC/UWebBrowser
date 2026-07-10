@@ -1,6 +1,6 @@
 import { CalendarClock } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { sourceError, usd } from "@/lib/format";
+import { usd } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import {
@@ -50,7 +50,8 @@ function SteamListBody({ widget, active, onOpen }: DashBodyProps<SteamListWidget
   return (
     <DataCard
       label={`Steam · ${category.label}`}
-      error={!items && error ? sourceError("Steam", error) : null}
+      source="Steam"
+      error={error}
       loading={!items}
       skeleton={<RowSkeletons count={5} className="h-10" />}
       links={<CardLink onClick={() => onOpen(category.url)}>Open Steam</CardLink>}

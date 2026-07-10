@@ -19,11 +19,12 @@ import { UnrealHub } from "./components/UnrealHub";
 import { Workbar } from "./components/Workbar";
 import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
 import { FindBar } from "./components/FindBar";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { DevtoolsDock } from "./components/DevtoolsDock";
 import { Button } from "./components/ui/button";
 import { Z_STRIP, Z_TOAST } from "./components/ui/overlay";
 import { StatusPage } from "./components/ui/status-page";
-import { cn } from "./lib/utils";
+import { clamp, cn } from "./lib/utils";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
@@ -44,12 +45,29 @@ import { GITHUB_REPO_URL } from "./lib/github";
 const TerminalView = lazy(() =>
   import("./components/TerminalView").then((m) => ({ default: m.TerminalView })),
 );
-import { ipc } from "./lib/ipc";
+import { fire, ipc, setIpcErrorReporter, silent } from "./lib/ipc";
 import { loadConfig, saveConfig, type UwbConfig } from "./lib/config";
-import { loadSession, saveSession } from "./lib/session";
+import {
+  loadClosedTabs,
+  loadSession,
+  saveClosedTabs,
+  saveSession,
+  type ClosedTab,
+} from "./lib/session";
 import type { LinkItem } from "./lib/engines";
 import { recordVisit, updateTitle } from "./lib/history";
 import { hostOf, tabLabelFor, isNavigableUrl } from "./lib/url";
+import {
+  DISCOVER_URL,
+  HISTORY_URL,
+  HOME_URL,
+  internalTitle,
+  normalizeInput,
+  SETTINGS_URL,
+  TERMINAL_URL,
+  UNREAL_URL,
+  WORKBAR_URL,
+} from "./lib/pages";
 import { zoomFor, setZoomFor } from "./lib/zoom";
 import {
   engineFor,
@@ -86,13 +104,6 @@ export type Tab = {
   navError?: { code: number; url: string };
 };
 
-export const HOME_URL = "uwb://home";
-export const DISCOVER_URL = "uwb://discover";
-export const UNREAL_URL = "uwb://unreal";
-export const SETTINGS_URL = "uwb://settings";
-export const WORKBAR_URL = "uwb://workbar";
-export const TERMINAL_URL = "uwb://terminal";
-export const HISTORY_URL = "uwb://history";
 const DISCORD_INVITE_URL = "https://discord.gg/bAeGFv4VBB";
 const TOP_INSET = 92; // 44px title bar + 48px toolbar
 const EXT_BAR_HEIGHT = 34; // pinned extensions strip, when shown
@@ -101,26 +112,14 @@ const SIDEBAR_DEFAULT_WIDTH = 240;
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 440;
 
+/** One arrow-key press on the sidebar splitter. */
+const SIDEBAR_KEY_STEP = 16;
+
 const clampSidebarWidth = (width: number) =>
-  Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+  clamp(Math.round(width), SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
 const DEFAULT_PROMPT_SNOOZE_KEY = "uwb.defaultBrowser.snoozeUntil";
 const DEFAULT_PROMPT_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
 const DEFAULT_PROMPT_DELAY_MS = 2500;
-
-const internalTitle = (url: string) =>
-  url === DISCOVER_URL
-    ? "Discover"
-    : url === UNREAL_URL
-      ? "Unreal"
-      : url === SETTINGS_URL
-        ? "Settings"
-        : url === WORKBAR_URL
-          ? "Work bar"
-          : url === TERMINAL_URL
-            ? "Terminal"
-            : url === HISTORY_URL
-              ? "History"
-              : "New tab";
 
 const homeTab = (url: string = HOME_URL): Tab => ({
   id: crypto.randomUUID(),
@@ -129,40 +128,6 @@ const homeTab = (url: string = HOME_URL): Tab => ({
   title: internalTitle(url),
   loading: false,
 });
-
-function normalizeInput(raw: string, searchUrl: (query: string) => string): string | null {
-  const input = raw.trim();
-  if (!input) return null;
-  if (input.startsWith("uwb:") || input.startsWith("gdb:")) {
-    if (input.includes("discover")) return DISCOVER_URL;
-    if (input.includes("unreal")) return UNREAL_URL;
-    if (input.includes("settings")) return SETTINGS_URL;
-    if (input.includes("workbar") || input.includes("widget")) return WORKBAR_URL;
-    if (input.includes("term")) return TERMINAL_URL;
-    if (input.includes("history")) return HISTORY_URL;
-    return HOME_URL;
-  }
-  if (/^(https?|file):\/\//i.test(input)) return input;
-  // A local path typed or pasted into the omnibox (C:\dev\page.html). encodeURI
-  // covers spaces etc.; # is legal in Windows file names but not in URLs.
-  if (/^[a-zA-Z]:[\\/]/.test(input)) {
-    return encodeURI(`file:///${input.replace(/\\/g, "/")}`).replace(/#/g, "%23");
-  }
-  // Dev hosts with no dot — localhost / IP, optionally with a port and path.
-  // These would otherwise fall through to search.
-  if (
-    /^localhost(:\d+)?(\/.*)?$/i.test(input) ||
-    /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(input)
-  ) {
-    return `http://${input}`;
-  }
-  // A space-free token that looks like a domain (a dotted name with a letter
-  // TLD, optionally a port/path) navigates; otherwise search.
-  if (!input.includes(" ") && /^[^\s/]+\.[a-z]{2,}(:\d+)?([/?#].*)?$/i.test(input)) {
-    return `https://${input}`;
-  }
-  return searchUrl(input);
-}
 
 export default function App() {
   // Restore last session's tabs; webviews for web tabs are recreated below.
@@ -194,6 +159,9 @@ export default function App() {
     () => localStorage.getItem("uwb.extBar") === "1",
   );
   const [findOpen, setFindOpen] = useState(false);
+  // Bumped by every Ctrl+F so the bar re-focuses and selects its query even when
+  // it's already open.
+  const [findFocusSignal, setFindFocusSignal] = useState(0);
   // Docked DevTools: which tab the panel is inspecting (null = closed), which
   // edge it's docked to, and how much of the content area it takes. The panel
   // body is a native webview the backend lays out; only the resize/controls
@@ -221,7 +189,15 @@ export default function App() {
   const [authReq, setAuthReq] = useState<AuthReq | null>(null);
   const [certReq, setCertReq] = useState<CertReq | null>(null);
   const [externalUrl, setExternalUrl] = useState<string | null>(null);
-  const closedUrls = useRef<string[]>([]);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Recently-closed tabs, newest last. Seeded from disk so Ctrl+Shift+T works
+  // after a restart, and written back whenever it changes.
+  const closedTabs = useRef<ClosedTab[]>(loadClosedTabs());
+
+  // Route every `fire()` failure into the toast. Without this a rejected
+  // fire-and-forget command is a dead-end button: the click does nothing and
+  // nothing says why.
+  useEffect(() => setIpcErrorReporter(setToast), []);
 
   useEffect(() => saveWidgets(widgets), [widgets]);
   // Debounced session save: tab state churns rapidly (loading toggles, title and
@@ -252,23 +228,28 @@ export default function App() {
       // createTab sizes the page from these insets, and at boot the layout
       // effect below hasn't reached the backend yet — without this the
       // restored page is created at 0,0 and covers the whole window.
-      await ipc
-        .setContentInsets(TOP_INSET, sidebarOpen ? sidebarWidth : 0, 0)
-        .catch(() => {});
+      // Awaited (so it lands before createTab), but its failure is not fatal —
+      // the layout effect below re-pushes these on the next render.
+      await ipc.setContentInsets(TOP_INSET, sidebarOpen ? sidebarWidth : 0, 0).catch(() => {});
       if (cancelled) return;
       const active = tabsRef.current.find((t) => t.id === activeIdRef.current);
       if (active?.kind === "web") {
         materialized.current.add(active.id);
-        await ipc.createTab(active.id, active.url).catch(() => {});
+        await ipc
+          .createTab(active.id, active.url)
+          .catch((e) => setToast(`Couldn’t restore that tab: ${e}`));
         if (cancelled) return;
-        ipc.activateTab(active.id).catch(() => {});
+        silent(ipc.activateTab(active.id));
       } else {
-        ipc.activateTab(null).catch(() => {});
+        silent(ipc.activateTab(null));
       }
     })();
     return () => {
       cancelled = true;
     };
+    // Boot only. `sidebarOpen`/`sidebarWidth` are read for their *restored*
+    // values; listing them would re-run session restore on every sidebar drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Kill PTY sessions whose tab is gone (closed, or navigated away from
@@ -288,6 +269,11 @@ export default function App() {
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+  /** The active tab, read from refs so callers stay identity-stable. */
+  const currentTab = useCallback(
+    () => tabsRef.current.find((t) => t.id === activeIdRef.current),
+    [],
+  );
   const openExtIdRef = useRef(openExtId);
   openExtIdRef.current = openExtId;
   const devtoolsTabIdRef = useRef(devtoolsTabId);
@@ -302,7 +288,9 @@ export default function App() {
     if (tab.kind !== "web") return false;
     if (!materialized.current.has(tab.id)) {
       materialized.current.add(tab.id);
-      ipc.createTab(tab.id, tab.url).catch(() => {});
+      // A tab whose webview can't be created is a permanently blank page; say so
+      // rather than leaving the user staring at nothing.
+      fire(ipc.createTab(tab.id, tab.url), "Couldn’t open that page");
     }
     return true;
   }, []);
@@ -320,6 +308,7 @@ export default function App() {
     certActive ||
     authActive ||
     permActive ||
+    shortcutsOpen ||
     externalUrl != null;
 
   // The pinned extensions strip is a third chrome row; the content area (and
@@ -351,7 +340,7 @@ export default function App() {
   useEffect(() => {
     if (sidebarResizing) return;
     const left = sidebarOpen ? sidebarWidth : 0;
-    ipc.setContentInsets(topInset, left, 0).catch(() => {});
+    silent(ipc.setContentInsets(topInset, left, 0));
     localStorage.setItem("uwb.sidebar", sidebarOpen ? "1" : "0");
     localStorage.setItem("uwb.sidebarWidth", String(sidebarWidth));
   }, [sidebarOpen, sidebarWidth, sidebarResizing, topInset]);
@@ -364,8 +353,8 @@ export default function App() {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     setSidebarResizing(true);
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
-    if (tab?.kind === "web") ipc.activateTab(null).catch(() => {});
+    const tab = currentTab();
+    if (tab?.kind === "web") silent(ipc.activateTab(null));
   };
 
   const moveSidebarResize = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -379,18 +368,18 @@ export default function App() {
     const width = clampSidebarWidth(e.clientX);
     setSidebarWidth(width);
     setSidebarResizing(false);
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    const tab = currentTab();
     if (tab?.kind !== "web") return;
     // Size the webview before showing it so it doesn't flash at the old width.
-    ipc
-      .setContentInsets(topInset, width, 0)
-      .catch(() => {})
-      .then(() => ipc.activateTab(tab.id))
-      .catch(() => {});
+    // `finally`, not `then`: a failed resize must still re-show the page, or the
+    // drag ends on a blank window.
+    silent(ipc.setContentInsets(topInset, width, 0).finally(() => ipc.activateTab(tab.id)));
   };
 
   const openNewTab = useCallback(
-    (url?: string) => {
+    /** `at` places the tab at an exact strip index (reopening a closed tab);
+     *  omitted, it lands just right of the active tab, as Chrome does. */
+    (url?: string, at?: number) => {
       const tab = homeTab(url?.startsWith("uwb:") ? url : undefined);
       if (url && !url.startsWith("uwb:")) {
         // Reject javascript:/data:/blob: and other non-navigable links (the
@@ -404,18 +393,22 @@ export default function App() {
         tab.title = tabLabelFor(url);
         tab.loading = true;
         materialized.current.add(tab.id);
-        ipc.createTab(tab.id, url).catch(() => {});
+        fire(ipc.createTab(tab.id, url), "Couldn’t open that page");
       } else {
         // Internal pages render in the chrome; just clear the content area.
-        ipc.activateTab(null).catch(() => {});
+        silent(ipc.activateTab(null));
       }
       // Insert directly to the right of the active tab (Chrome/Firefox
       // behaviour), not at the very end of the strip.
       setTabs((prev) => {
-        const at = prev.findIndex((t) => t.id === activeIdRef.current);
-        if (at === -1) return [...prev, tab];
         const next = [...prev];
-        next.splice(at + 1, 0, tab);
+        if (at !== undefined) {
+          next.splice(Math.min(Math.max(at, 0), prev.length), 0, tab);
+          return next;
+        }
+        const active = prev.findIndex((t) => t.id === activeIdRef.current);
+        if (active === -1) return [...prev, tab];
+        next.splice(active + 1, 0, tab);
         return next;
       });
       setActiveId(tab.id);
@@ -503,7 +496,7 @@ export default function App() {
         setTabs((prev) =>
           prev.map((tab) => (tab.id === id ? { ...tab, crashed: true } : tab)),
         );
-        if (id === activeIdRef.current) ipc.activateTab(null).catch(() => {});
+        if (id === activeIdRef.current) silent(ipc.activateTab(null));
         return;
       }
       if (kind === "url" && (!value || value === "about:blank" || !isNavigableUrl(value))) {
@@ -548,11 +541,11 @@ export default function App() {
         // Create the webview now if this is a restored tab being shown for the
         // first time.
         ensureMaterialized(tab);
-        ipc.activateTab(tab.id).catch(() => {});
+        silent(ipc.activateTab(tab.id));
       } else {
         // Internal page, or a crashed tab whose dead surface we keep hidden so
         // the recover panel shows instead.
-        ipc.activateTab(null).catch(() => {});
+        silent(ipc.activateTab(null));
       }
     },
     [ensureMaterialized],
@@ -564,8 +557,8 @@ export default function App() {
     setTabs((prev) =>
       prev.map((t) => (t.id === tab.id ? { ...t, crashed: false, loading: true } : t)),
     );
-    ipc.navigateTab(tab.id, tab.url).catch(() => {});
-    ipc.activateTab(tab.id).catch(() => {});
+    fire(ipc.navigateTab(tab.id, tab.url), "Couldn’t reload that page");
+    silent(ipc.activateTab(tab.id));
   }, []);
 
   // Poll the active web tab's live URL. SPAs (the Chrome Web Store especially)
@@ -577,11 +570,10 @@ export default function App() {
       // Idle when the window is hidden (tray/minimized) so a backgrounded
       // browser stops round-tripping to the engine every 700ms.
       if (document.hidden) return;
-      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      const tab = currentTab();
       if (tab?.kind !== "web" || tab.crashed) return;
-      ipc
-        .tabLiveUrl(tab.id)
-        .then((url) => {
+      silent(
+        ipc.tabLiveUrl(tab.id).then((url) => {
           // Ignore a blank/non-navigable live URL: a page that briefly bounced
           // through about:blank (a denied popup's leftover, an anti-embed hop)
           // must not overwrite the tab's real address with a white page.
@@ -589,20 +581,20 @@ export default function App() {
           setTabs((prev) =>
             prev.map((t) => (t.id === tab.id && t.url !== url ? { ...t, url } : t)),
           );
-        })
-        .catch(() => {});
+        }),
+      );
     }, 700);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [currentTab]);
 
   // The native tab webview paints over any chrome overlay, so hide it while the
   // omnibox suggestions or the downloads panel are showing.
   useEffect(() => {
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    const tab = currentTab();
     if (tab?.kind !== "web") return;
     const hide = omniboxOpen || downloadsPanelOpen || webviewBlocked;
-    ipc.activateTab(hide ? null : tab.id).catch(() => {});
-  }, [omniboxOpen, downloadsPanelOpen, webviewBlocked]);
+    silent(ipc.activateTab(hide ? null : tab.id));
+  }, [omniboxOpen, downloadsPanelOpen, webviewBlocked, currentTab]);
 
   useEffect(() => {
     if (!toast) return;
@@ -623,45 +615,58 @@ export default function App() {
   // toolbar button, F12 and Ctrl+Shift+I (via runAction, so the native
   // accelerator path and the DOM keydown path behave identically).
   const toggleDevtools = useCallback(() => {
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    const tab = currentTab();
     if (tab?.kind !== "web") return;
     if (devtoolsTabIdRef.current === tab.id) {
       setDevtoolsTabId(null);
-      ipc.devtoolsClose().catch(() => {});
+      silent(ipc.devtoolsClose());
     } else {
       setDevtoolsTabId(tab.id);
-      ipc.devtoolsOpen(tab.id).catch(() => {});
+      fire(ipc.devtoolsOpen(tab.id), "Couldn’t open DevTools");
     }
-  }, []);
+  }, [currentTab]);
 
-  // Restore the active tab's per-site zoom when its host changes, like Chrome.
-  // Keyed on host (not full URL) so in-site navigation doesn't re-apply on every
-  // path change; the native Ctrl+/- path persists via the "zoom" event above.
+  // Restore the active tab's per-site zoom, like Chrome. Keyed on host (not full
+  // URL) so in-site navigation doesn't re-apply on every path change; the native
+  // Ctrl+/- path persists via the "zoom" event above.
+  //
+  // It must also depend on the *tab*: zoom lives on the webview, and each tab has
+  // its own. Without `activeTab.id` here, opening a second tab on a host you've
+  // already zoomed leaves that tab at 100% — the host never changed, so the
+  // effect never re-ran.
   const activeHost = activeTab.kind === "web" ? hostOf(activeTab.url) : "";
+  const activeTabId = activeTab.id;
   useEffect(() => {
     if (!activeHost) return;
-    ipc.tabZoom(activeIdRef.current, zoomFor(activeHost)).catch(() => {});
-  }, [activeHost]);
+    // A fresh tab's webview is created by a separate, un-awaited `createTab`, so
+    // the first zoom can race it ("tab webview not found"). Retry once rather
+    // than silently dropping the user's remembered zoom.
+    let timer: number | undefined;
+    const apply = () => ipc.tabZoom(activeTabId, zoomFor(activeHost));
+    apply().catch(() => {
+      timer = window.setTimeout(() => silent(apply()), 120);
+    });
+    return () => window.clearTimeout(timer);
+  }, [activeHost, activeTabId]);
 
   // Load installed extensions once. Auto-open the bar the first time any exist
   // (until the user makes their own choice, tracked in localStorage).
   useEffect(() => {
-    ipc
-      .extList()
-      .then((list) => {
+    silent(
+      ipc.extList().then((list) => {
         setExtensions(list);
         if (list.length > 0 && localStorage.getItem("uwb.extBar") === null) {
           setExtBarOpen(true);
         }
-      })
-      .catch(() => {});
+      }),
+    );
   }, []);
 
   // Persist the bar preference; hiding it also dismisses any floating popup.
   useEffect(() => {
     localStorage.setItem("uwb.extBar", extBarOpen ? "1" : "0");
     if (!extBarOpen && openExtIdRef.current) {
-      ipc.extClosePopup().catch(() => {});
+      silent(ipc.extClosePopup());
       setOpenExtId(null);
     }
   }, [extBarOpen]);
@@ -670,7 +675,7 @@ export default function App() {
   // close it whenever the active tab changes.
   useEffect(() => {
     if (openExtIdRef.current) {
-      ipc.extClosePopup().catch(() => {});
+      silent(ipc.extClosePopup());
       setOpenExtId(null);
     }
     // The find bar is tied to the tab that was active when it opened.
@@ -683,7 +688,7 @@ export default function App() {
   useEffect(() => {
     const onResize = () => {
       if (!openExtIdRef.current) return;
-      ipc.extClosePopup().catch(() => {});
+      silent(ipc.extClosePopup());
       setOpenExtId(null);
     };
     window.addEventListener("resize", onResize);
@@ -706,10 +711,7 @@ export default function App() {
   // drained once, plus links clicked in other apps while we're running,
   // forwarded by the single-instance callback.
   useEffect(() => {
-    ipc
-      .takeStartupUrls()
-      .then((urls) => urls.forEach((url) => openNewTab(url)))
-      .catch(() => {});
+    silent(ipc.takeStartupUrls().then((urls) => urls.forEach((url) => openNewTab(url))));
     const unlisten = ipc.onOpenUrl((url) => openNewTab(url));
     return () => {
       unlisten.then((fn) => fn());
@@ -723,10 +725,7 @@ export default function App() {
       return;
     }
     const timer = window.setTimeout(() => {
-      ipc
-        .isDefaultBrowser()
-        .then((isDefault) => setDefaultPrompt(!isDefault))
-        .catch(() => {});
+      silent(ipc.isDefaultBrowser().then((isDefault) => setDefaultPrompt(!isDefault)));
     }, DEFAULT_PROMPT_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, []);
@@ -736,15 +735,14 @@ export default function App() {
   useEffect(() => {
     if (!defaultPrompt) return;
     const onFocus = () => {
-      ipc
-        .isDefaultBrowser()
-        .then((isDefault) => {
+      silent(
+        ipc.isDefaultBrowser().then((isDefault) => {
           if (isDefault) {
             setDefaultPrompt(false);
             setToast("UWebBrowser is now your default browser");
           }
-        })
-        .catch(() => {});
+        }),
+      );
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
@@ -762,7 +760,7 @@ export default function App() {
   // internal, otherwise open a new one next to the page being read.
   const goInternal = useCallback(
     (url: string) => {
-      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      const tab = currentTab();
       if (tab?.kind === "home") {
         setTabs((prev) =>
           prev.map((t) =>
@@ -773,14 +771,14 @@ export default function App() {
         openNewTab(url);
       }
     },
-    [openNewTab],
+    [openNewTab, currentTab],
   );
 
   const navigateActive = useCallback(
     (raw: string) => {
       const url = normalizeInput(raw, engineFor(settings.searchEngine).searchUrl);
       if (!url) return;
-      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      const tab = currentTab();
       if (!tab) return;
       if (url.startsWith("uwb:")) {
         goInternal(url);
@@ -788,7 +786,7 @@ export default function App() {
       }
       if (tab.kind === "home") {
         materialized.current.add(tab.id);
-        ipc.createTab(tab.id, url).catch(() => {});
+        fire(ipc.createTab(tab.id, url), "Couldn’t open that page");
         setTabs((prev) =>
           prev.map((t) =>
             t.id === tab.id
@@ -797,23 +795,36 @@ export default function App() {
           ),
         );
       } else {
-        ipc.navigateTab(tab.id, url).catch(() => {});
+        fire(ipc.navigateTab(tab.id, url), "Couldn’t open that page");
         setTabs((prev) =>
           prev.map((t) => (t.id === tab.id ? { ...t, url, loading: true } : t)),
         );
       }
     },
-    [goInternal, settings],
+    [goInternal, settings, currentTab],
   );
 
   const closeTab = useCallback((id: string) => {
     const current = tabsRef.current;
     const closing = current.find((t) => t.id === id);
     if (!closing) return;
+
+    // Remember every closed tab — internal pages included, so closing History or
+    // Settings is as undoable as closing a web page — with the slot it sat in.
+    closedTabs.current = [
+      ...closedTabs.current,
+      {
+        url: closing.url,
+        title: closing.title,
+        kind: closing.kind,
+        index: current.findIndex((t) => t.id === id),
+      },
+    ].slice(-10);
+    saveClosedTabs(closedTabs.current);
+
     if (closing.kind === "web") {
-      closedUrls.current.push(closing.url);
       // Only a materialized tab has a webview to close.
-      if (materialized.current.has(id)) ipc.closeTab(id).catch(() => {});
+      if (materialized.current.has(id)) silent(ipc.closeTab(id));
       materialized.current.delete(id);
       // The backend unbinds DevTools from a closed tab on its side; keep the
       // chrome state in step so the strip doesn't linger.
@@ -825,7 +836,7 @@ export default function App() {
       const fresh = homeTab();
       setTabs([fresh]);
       setActiveId(fresh.id);
-      ipc.activateTab(null).catch(() => {});
+      silent(ipc.activateTab(null));
       return;
     }
     setTabs(remaining);
@@ -835,9 +846,9 @@ export default function App() {
       setActiveId(next.id);
       if (next.kind === "web" && !next.crashed) {
         ensureMaterialized(next);
-        ipc.activateTab(next.id).catch(() => {});
+        silent(ipc.activateTab(next.id));
       } else {
-        ipc.activateTab(null).catch(() => {});
+        silent(ipc.activateTab(null));
       }
     }
   }, [ensureMaterialized]);
@@ -859,11 +870,16 @@ export default function App() {
   // Stable handlers so the memoized TitleBar/Toolbar/Sidebar don't re-render on
   // every poll tick or toast. The web-tab actions read refs, so they never need
   // to change identity.
-  const withWebTab = useCallback((fn: (id: string) => void) => {
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
-    if (tab?.kind === "web") fn(tab.id);
-  }, []);
+  const withWebTab = useCallback(
+    (fn: (id: string) => void) => {
+      const tab = currentTab();
+      if (tab?.kind === "web") fn(tab.id);
+    },
+    [currentTab],
+  );
   const handleNewTab = useCallback(() => openNewTab(), [openNewTab]);
+  const duplicateTab = useCallback((tab: Tab) => openNewTab(tab.url), [openNewTab]);
+  const reopenClosedTab = useCallback(() => runActionRef.current("reopen-tab"), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), []);
   const toggleExtensions = useCallback(() => setExtBarOpen((open) => !open), []);
   const installExtensionFromStore = useCallback(async (id: string) => {
@@ -886,18 +902,42 @@ export default function App() {
   const goHome = useCallback(() => goInternal(HOME_URL), [goInternal]);
   const goGithub = useCallback(() => openNewTab(GITHUB_REPO_URL), [openNewTab]);
   const goDiscord = useCallback(() => openNewTab(DISCORD_INVITE_URL), [openNewTab]);
-  const onBack = useCallback(() => withWebTab((id) => ipc.goBack(id)), [withWebTab]);
-  const onForward = useCallback(() => withWebTab((id) => ipc.goForward(id)), [withWebTab]);
-  const onReload = useCallback(() => withWebTab((id) => ipc.reload(id)), [withWebTab]);
-  const onStop = useCallback(() => withWebTab((id) => ipc.stop(id)), [withWebTab]);
+  const onBack = useCallback(
+    () => withWebTab((id) => silent(ipc.goBack(id))),
+    [withWebTab],
+  );
+  const onForward = useCallback(
+    () => withWebTab((id) => silent(ipc.goForward(id))),
+    [withWebTab],
+  );
+  const onReload = useCallback(
+    (hard = false) => withWebTab((id) => fire(ipc.reload(id, hard), "Couldn’t reload the page")),
+    [withWebTab],
+  );
+  const onStop = useCallback(() => withWebTab((id) => silent(ipc.stop(id))), [withWebTab]);
   const onDevtools = toggleDevtools;
-  const onDownloadsPanelOpen = useCallback((open: boolean) => setDownloadsPanelOpen(open), []);
+
+  // Re-request a download's source URL. In the active web tab, exactly as
+  // re-clicking the original link would: the response is an attachment, so the
+  // page stays put and the transfer restarts. With no page to ask, open a tab.
+  const onRetryDownload = useCallback(
+    (url: string) => {
+      const tab = currentTab();
+      if (tab?.kind === "web" && !tab.crashed) {
+        fire(ipc.navigateTab(tab.id, url), "Couldn’t restart that download");
+      } else {
+        openNewTab(url);
+      }
+    },
+    [currentTab, openNewTab],
+  );
+
   const onTogglePin = useCallback(() => {
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    const tab = currentTab();
     if (tab?.kind === "web") {
       handleTogglePin({ name: tab.title || hostOf(tab.url), url: tab.url });
     }
-  }, [handleTogglePin]);
+  }, [handleTogglePin, currentTab]);
 
   const cycleTabs = useCallback(
     (dir: 1 | -1) => {
@@ -920,8 +960,11 @@ export default function App() {
           openNewTab();
           break;
         case "reopen-tab": {
-          const url = closedUrls.current.pop();
-          if (url) openNewTab(url);
+          const last = closedTabs.current.pop();
+          if (last) {
+            saveClosedTabs(closedTabs.current);
+            openNewTab(last.url, last.index);
+          }
           break;
         }
         case "close-tab":
@@ -931,18 +974,27 @@ export default function App() {
           setAddressFocusSignal((n) => n + 1);
           break;
         case "find":
-          if (tabsRef.current.find((t) => t.id === activeIdRef.current)?.kind === "web") {
+          if (currentTab()?.kind === "web") {
+            // Bump even when already open: Ctrl+F must re-focus and select the
+            // query, the way it does in Chrome.
             setFindOpen(true);
+            setFindFocusSignal((n) => n + 1);
           }
           break;
         case "reload":
-          withWebTab((id) => ipc.reload(id));
+          onReload(false);
+          break;
+        case "hard-reload":
+          onReload(true);
           break;
         case "devtools":
           toggleDevtools();
           break;
+        case "shortcuts":
+          setShortcutsOpen((open) => !open);
+          break;
         case "print":
-          withWebTab((id) => ipc.tabPrint(id));
+          withWebTab((id) => fire(ipc.tabPrint(id), "Couldn’t open the print dialog"));
           break;
         case "downloads":
           setDownloadsOpenSignal((n) => n + 1);
@@ -955,10 +1007,10 @@ export default function App() {
           goInternal(SETTINGS_URL);
           break;
         case "back":
-          withWebTab((id) => ipc.goBack(id));
+          onBack();
           break;
         case "forward":
-          withWebTab((id) => ipc.goForward(id));
+          onForward();
           break;
         case "next-tab":
           cycleTabs(1);
@@ -983,7 +1035,20 @@ export default function App() {
           }
       }
     },
-    [openNewTab, closeTab, withWebTab, cycleTabs, goInternal, activate, onTogglePin, toggleDevtools],
+    [
+      openNewTab,
+      closeTab,
+      withWebTab,
+      cycleTabs,
+      goInternal,
+      activate,
+      onTogglePin,
+      toggleDevtools,
+      currentTab,
+      onReload,
+      onBack,
+      onForward,
+    ],
   );
   // Ref so the tab-event listener can call the latest runAction without
   // re-subscribing on every identity change.
@@ -1001,7 +1066,8 @@ export default function App() {
         if (e.key === "ArrowRight") return "forward";
         return null;
       }
-      if (e.key === "F5") return "reload";
+      // F5 reloads; Ctrl+F5 bypasses the cache, like Chrome.
+      if (e.key === "F5") return e.ctrlKey ? "hard-reload" : "reload";
       if (e.key === "F12") return "devtools";
       if (!e.ctrlKey && !e.metaKey) return null;
       // Ctrl+Shift+I — DevTools (checked before the lowercased single-key chords).
@@ -1010,11 +1076,13 @@ export default function App() {
       if (e.key >= "1" && e.key <= "9") return `tab-${e.key}`;
       // Ctrl+Shift+Delete — clear browsing data (opens Settings).
       if (e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) return "clear-data";
+      // Ctrl+/ — the shortcut cheat-sheet.
+      if (e.key === "/") return "shortcuts";
       const key = e.key.toLowerCase();
       if (key === "t") return e.shiftKey ? "reopen-tab" : "new-tab";
       if (key === "w") return "close-tab";
       if (key === "l") return "focus-omnibox";
-      if (key === "r") return "reload";
+      if (key === "r") return e.shiftKey ? "hard-reload" : "reload";
       if (key === "f") return "find";
       if (key === "h") return "history";
       if (key === "p") return "print";
@@ -1044,7 +1112,7 @@ export default function App() {
         }
         if (openExtIdRef.current) {
           e.preventDefault();
-          ipc.extClosePopup().catch(() => {});
+          silent(ipc.extClosePopup());
           setOpenExtId(null);
           return;
         }
@@ -1079,6 +1147,8 @@ export default function App() {
         onReorder={reorderTabs}
         onToggleExtensions={toggleExtensions}
         extensionsActive={showExtBar}
+        onDuplicate={duplicateTab}
+        onReopenClosed={reopenClosedTab}
       />
       <Toolbar
         tab={activeTab}
@@ -1102,8 +1172,9 @@ export default function App() {
         onSuggestionsOpen={setOmniboxOpen}
         onDevtools={onDevtools}
         devtoolsActive={devtoolsVisible}
-        onDownloadsPanelOpen={onDownloadsPanelOpen}
+        onDownloadsPanelOpen={setDownloadsPanelOpen}
         downloadsOpenSignal={downloadsOpenSignal}
+        onRetryDownload={onRetryDownload}
         onGithub={goGithub}
         onDiscord={goDiscord}
         onInstallExtension={installExtensionFromStore}
@@ -1147,15 +1218,35 @@ export default function App() {
           {sidebarOpen && (
             <div
               role="separator"
+              tabIndex={0}
               aria-orientation="vertical"
               aria-label="Resize work bar"
-              title="Drag to resize · double-click to reset"
+              aria-valuenow={sidebarWidth}
+              aria-valuemin={SIDEBAR_MIN_WIDTH}
+              aria-valuemax={SIDEBAR_MAX_WIDTH}
+              title="Drag or use the arrow keys to resize · double-click to reset"
               className="group absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize touch-none"
               onPointerDown={startSidebarResize}
               onPointerMove={moveSidebarResize}
               onPointerUp={endSidebarResize}
               onPointerCancel={endSidebarResize}
               onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+              onKeyDown={(e) => {
+                // A `role="separator"` that ignores the arrow keys is a lie.
+                const step =
+                  e.key === "ArrowRight"
+                    ? SIDEBAR_KEY_STEP
+                    : e.key === "ArrowLeft"
+                      ? -SIDEBAR_KEY_STEP
+                      : 0;
+                if (step) {
+                  e.preventDefault();
+                  setSidebarWidth((w) => clampSidebarWidth(w + step));
+                } else if (e.key === "Home" || e.key === "End") {
+                  e.preventDefault();
+                  setSidebarWidth(e.key === "Home" ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH);
+                }
+              }}
             >
               <div
                 className={`absolute right-[3px] top-1/2 h-11 w-[3px] -translate-y-1/2 rounded-full transition-colors duration-[130ms] ease-brand ${
@@ -1236,10 +1327,14 @@ export default function App() {
             <NavErrorPage
               code={activeTab.navError.code}
               url={activeTab.navError.url}
-              onReload={() =>
-                activeTab.navError &&
-                ipc.navigateTab(activeTab.id, activeTab.navError.url).catch(() => {})
-              }
+              onReload={() => {
+                if (activeTab.navError) {
+                  fire(
+                    ipc.navigateTab(activeTab.id, activeTab.navError.url),
+                    "Couldn’t reach that page",
+                  );
+                }
+              }}
             />
           )}
 
@@ -1248,11 +1343,11 @@ export default function App() {
             <CertInterstitial
               req={certReq}
               onProceed={(id) => {
-                ipc.certRespond(id, true).catch(() => {});
+                fire(ipc.certRespond(id, true), "Couldn’t continue to that site");
                 setCertReq(null);
               }}
               onCancel={(id) => {
-                ipc.certRespond(id, false).catch(() => {});
+                silent(ipc.certRespond(id, false));
                 setCertReq(null);
               }}
             />
@@ -1263,11 +1358,11 @@ export default function App() {
             <BasicAuthDialog
               req={authReq}
               onSubmit={(id, u, p) => {
-                ipc.basicAuthRespond(id, u, p).catch(() => {});
+                fire(ipc.basicAuthRespond(id, u, p), "Couldn’t send those credentials");
                 setAuthReq(null);
               }}
               onCancel={(id) => {
-                ipc.basicAuthRespond(id, null, null).catch(() => {});
+                silent(ipc.basicAuthRespond(id, null, null));
                 setAuthReq(null);
               }}
             />
@@ -1277,8 +1372,13 @@ export default function App() {
           {permActive && permissionReq && (
             <PermissionPrompt
               req={permissionReq}
-              onRespond={(id, allow) => {
-                ipc.permissionRespond(id, allow).catch(() => {});
+              onRespond={(id, decision) => {
+                // A dropped response leaves the page waiting on a deferral
+                // forever — this is not a failure the user can be spared.
+                fire(
+                  ipc.permissionRespond(id, decision),
+                  "Couldn’t answer that permission request",
+                );
                 setPermissionReq(null);
               }}
             />
@@ -1289,7 +1389,7 @@ export default function App() {
             <ExternalLinkConfirm
               url={externalUrl}
               onOpen={() => {
-                ipc.openExternal(externalUrl).catch(() => {});
+                fire(ipc.openExternal(externalUrl), "No app is registered to open that link");
                 setExternalUrl(null);
               }}
               onCancel={() => setExternalUrl(null)}
@@ -1299,7 +1399,12 @@ export default function App() {
           {/* Find-in-page, in the strip reserved by `findActive` above. */}
           {findActive && (
             <div className={cn("absolute right-4 top-1", Z_STRIP)}>
-              <FindBar tabId={activeTab.id} onClose={() => setFindOpen(false)} />
+              <FindBar
+                tabId={activeTab.id}
+                pageUrl={activeTab.url}
+                focusSignal={findFocusSignal}
+                onClose={() => setFindOpen(false)}
+              />
             </div>
           )}
 
@@ -1313,23 +1418,22 @@ export default function App() {
               onResizeStart={() => {
                 setDevtoolsResizing(true);
                 // Hide the page while dragging, like the sidebar resize.
-                ipc.activateTab(null).catch(() => {});
+                silent(ipc.activateTab(null));
               }}
               onResize={setDevtoolsSize}
               onResizeEnd={(f) => {
                 setDevtoolsSize(f);
                 setDevtoolsResizing(false);
-                // Commit the size, then re-show the page at the new split.
-                ipc
-                  .devtoolsSetSize(f)
-                  .catch(() => {})
-                  .then(() => ipc.activateTab(activeTab.id))
-                  .catch(() => {});
+                // Commit the size, then re-show the page at the new split —
+                // `finally` so a failed commit still leaves the page visible.
+                silent(
+                  ipc.devtoolsSetSize(f).finally(() => ipc.activateTab(activeTab.id)),
+                );
               }}
               onToggleDock={() => {
                 const next = devtoolsDock === "bottom" ? "right" : "bottom";
                 setDevtoolsDock(next);
-                ipc.devtoolsSetDock(next).catch(() => {});
+                silent(ipc.devtoolsSetDock(next));
               }}
               onClose={toggleDevtools}
             />
@@ -1351,6 +1455,8 @@ export default function App() {
                 </div>
               ))}
           </Suspense>
+
+          {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
 
           {defaultPrompt && <DefaultBrowserPrompt onDismiss={dismissDefaultPrompt} />}
 

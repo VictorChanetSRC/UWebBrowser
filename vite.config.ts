@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -18,5 +19,11 @@ export default defineConfig({
   build: {
     target: "chrome110",
     outDir: "dist",
+  },
+  test: {
+    // The suite covers the pure decision-making modules under `src/lib` — the
+    // ones a browser bug hides in. Anything needing a DOM belongs in the app.
+    include: ["src/**/*.test.ts"],
+    environment: "node",
   },
 });

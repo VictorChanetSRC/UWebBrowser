@@ -1,6 +1,6 @@
 import { Newspaper } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { feedDate, sourceError } from "@/lib/format";
+import { feedDate } from "@/lib/format";
 import { usePolled } from "@/hooks/use-polled";
 import { VICTOR_CHANET } from "../types";
 import {
@@ -83,7 +83,8 @@ function NewsBody({ widget, active, onOpen }: DashBodyProps<NewsWidget>) {
   return (
     <DataCard
       label={source.label}
-      error={!items && error ? sourceError(source.label, error) : null}
+      source={source.label}
+      error={error}
       loading={!items}
       skeleton={<RowSkeletons count={5} className="h-9" />}
       links={<CardLink onClick={() => onOpen(source.home)}>Open site</CardLink>}

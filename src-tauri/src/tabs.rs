@@ -139,11 +139,6 @@ pub(crate) fn route_new_window(
     url: &Url,
     features: &tauri::webview::NewWindowFeatures,
 ) -> NewWindowResponse<tauri::Wry> {
-    eprintln!(
-        "[UWB-PROBE] new-window src={source_id} url={url} size={:?} pos={:?}",
-        features.size(),
-        features.position()
-    );
     match scheme_kind(url) {
         SchemeKind::Web => {
             if matches!(url.scheme(), "http" | "https")
@@ -333,7 +328,6 @@ pub async fn create_tab(
             emit_tab_event(&app_title, &id_title, "title", title);
         })
         .on_navigation(move |url| {
-            eprintln!("[UWB-PROBE] on_navigation tab={id_nav} url={url}");
             // Main-frame only — iframes (ads, sandboxes) fire a different
             // WebView2 event and are unaffected, so legitimate about:blank
             // iframes still load.
@@ -474,19 +468,67 @@ pub async fn activate_tab(
     Ok(())
 }
 
-/// Run a script inside a tab webview. Used for history navigation and reload.
-#[tauri::command]
-pub async fn tab_eval(app: AppHandle, id: String, js: String) -> Result<(), String> {
+/// Drive one of the tab's navigation controls through the engine's own session
+/// history, falling back to injected script only where there is no native path
+/// (non-Windows). See [`crate::webext::NavAction`] for why the native path
+/// matters: the script version dies on a hung page, and `window.stop()` can't
+/// abort a load that hasn't committed a document.
+async fn nav_action(app: &AppHandle, id: &str, action: crate::webext::NavAction) -> Result<(), String> {
+    use crate::webext::NavAction;
     let webview = app
-        .get_webview(&tab_label(&id))
+        .get_webview(&tab_label(id))
         .ok_or("tab webview not found")?;
-    webview.eval(&js).map_err(|e| e.to_string())
+    if !crate::webext::navigate(&webview, action) {
+        let js = match action {
+            NavAction::Back => "history.back()",
+            NavAction::Forward => "history.forward()",
+            NavAction::Reload => "location.reload()",
+            NavAction::HardReload => "location.reload()",
+            NavAction::Stop => "window.stop()",
+        };
+        webview.eval(js).map_err(|e| e.to_string())?;
+    }
+    // Stop aborts the load without the engine raising a page-load event, so the
+    // toolbar would keep spinning on a stopped page. Settle it here.
+    if matches!(action, NavAction::Stop) {
+        emit_tab_event(app, id, "loading", "false".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tab_back(app: AppHandle, id: String) -> Result<(), String> {
+    nav_action(&app, &id, crate::webext::NavAction::Back).await
+}
+
+#[tauri::command]
+pub async fn tab_forward(app: AppHandle, id: String) -> Result<(), String> {
+    nav_action(&app, &id, crate::webext::NavAction::Forward).await
+}
+
+/// `hard` bypasses the HTTP cache (Ctrl+Shift+R / Ctrl+F5).
+#[tauri::command]
+pub async fn tab_reload(app: AppHandle, id: String, hard: bool) -> Result<(), String> {
+    let action = if hard {
+        crate::webext::NavAction::HardReload
+    } else {
+        crate::webext::NavAction::Reload
+    };
+    nav_action(&app, &id, action).await
+}
+
+#[tauri::command]
+pub async fn tab_stop(app: AppHandle, id: String) -> Result<(), String> {
+    nav_action(&app, &id, crate::webext::NavAction::Stop).await
 }
 
 /// Find-in-page. Drives Chromium's built-in `window.find`, which moves the
 /// selection and scrolls the first match into view — a lightweight Ctrl+F with
 /// no extra COM. `forward`/`from_start` let the chrome find bar step matches and
 /// restart the search when the query changes.
+/// Returns whether the query matched anything. `window.find` yields no match
+/// *count* (so the bar shows none), but it does report a hit, which is enough to
+/// tell the user — and a screen reader — that a search found nothing.
 #[tauri::command]
 pub async fn tab_find(
     app: AppHandle,
@@ -494,25 +536,35 @@ pub async fn tab_find(
     query: String,
     forward: bool,
     from_start: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let webview = app
         .get_webview(&tab_label(&id))
         .ok_or("tab webview not found")?;
+    if query.is_empty() {
+        // Clear the highlight when the bar empties.
+        webview
+            .eval("window.getSelection()?.removeAllRanges();")
+            .map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
     // JSON-encode the query so quotes/backslashes can't break out of the script.
     let q = serde_json::to_string(&query).map_err(|e| e.to_string())?;
-    let js = if query.is_empty() {
-        // Clear the highlight when the bar empties.
-        "window.getSelection()?.removeAllRanges();".to_string()
-    } else {
-        format!(
-            "(function(){{try{{\
-               if({from_start})window.getSelection()?.collapseToStart();\
-               window.find({q},false,{back},true,false,false,false);\
-             }}catch(e){{}}}})()",
-            back = if forward { "false" } else { "true" },
-        )
-    };
-    webview.eval(&js).map_err(|e| e.to_string())
+    let js = format!(
+        "(function(){{try{{\
+           if({from_start})window.getSelection()?.collapseToStart();\
+           return window.find({q},false,{back},true,false,false,false);\
+         }}catch(e){{return false}}}})()",
+        back = if forward { "false" } else { "true" },
+    );
+    match crate::webext::eval_bool(&webview, &js) {
+        Some(found) => Ok(found),
+        // No result channel (non-Windows, or an old runtime). Run it anyway and
+        // claim a match: a false "No matches" is worse than none.
+        None => {
+            webview.eval(&js).map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+    }
 }
 
 /// Open the native Chromium DevTools *floating window* for a tab. Kept as an
@@ -636,8 +688,8 @@ pub async fn tab_print(app: AppHandle, id: String) -> Result<(), String> {
 /// Answer a permission prompt (camera/mic/geolocation/notifications/clipboard)
 /// the chrome UI raised from a `permission` tab-event.
 #[tauri::command]
-pub async fn permission_respond(app: AppHandle, id: String, allow: bool) -> Result<(), String> {
-    crate::webext::permission_respond(&app, id, allow);
+pub async fn permission_respond(app: AppHandle, id: String, decision: String) -> Result<(), String> {
+    crate::webext::permission_respond(&app, id, decision);
     Ok(())
 }
 

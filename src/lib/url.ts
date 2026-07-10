@@ -1,5 +1,5 @@
-/** URL helpers shared by the tab strip, omnibox, work bar and password panel,
- *  so host parsing and favicon URLs are spelled one way. */
+/** URL helpers shared by the tab strip, omnibox, work bar and history page, so
+ *  host parsing and favicon URLs are spelled one way. */
 
 /** Hostname of a URL, or the raw string if it won't parse (bare hosts, typed
  *  fragments). Never throws. */

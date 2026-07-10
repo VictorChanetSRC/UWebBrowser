@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
-import { ipc } from "../lib/ipc";
+import { ipc, silent } from "../lib/ipc";
 import { IconButton } from "./ui/icon-button";
 
 /**
@@ -8,36 +8,67 @@ import { IconButton } from "./ui/icon-button";
  * (a floating overlay would be painted over by the native tab webview), and
  * drives Chromium's `window.find` through the backend. Each query change
  * restarts the search from the top; Enter / the arrows step matches.
+ *
+ * There is no match count: `window.find` doesn't return one, and we have no
+ * ExecuteScript-with-result plumbing to compute one. What the bar *can* do is
+ * say whether the current query matched anything at all, which is announced to
+ * assistive tech — otherwise a screen-reader user typing a search hears only
+ * their own keystrokes.
  */
-export function FindBar({ tabId, onClose }: { tabId: string; onClose: () => void }) {
+export function FindBar({
+  tabId,
+  pageUrl,
+  focusSignal,
+  onClose,
+}: {
+  tabId: string;
+  /** The tab's current URL. A same-tab navigation drops the old highlight, so
+   *  the search has to be re-issued against the new document. */
+  pageUrl: string;
+  /** Bumped on every Ctrl+F, including while the bar is already open. */
+  focusSignal: number;
+  onClose: () => void;
+}) {
   const [query, setQuery] = useState("");
+  const [missed, setMissed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Focus the field whenever the bar opens for a (possibly different) tab.
+  // Focus the field when the bar opens, when the tab changes, and on every
+  // repeat Ctrl+F — pressing it again with the bar already open must re-focus
+  // and select the query, as it does in Chrome, not silently do nothing.
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [tabId]);
+  }, [tabId, focusSignal]);
 
   const empty = query.trim() === "";
 
   const search = (forward: boolean, fromStart: boolean) => {
     if (empty) return;
-    ipc.tabFind(tabId, query, forward, fromStart).catch(() => {});
+    silent(ipc.tabFind(tabId, query, forward, fromStart));
   };
 
   // Restart the search from the top on every query change, debounced so a fast
-  // typist doesn't fire (and re-highlight) a search on every keystroke.
+  // typist doesn't fire (and re-highlight) a search on every keystroke. Also
+  // re-runs when the page navigates under us, which would otherwise leave the
+  // field populated and nothing highlighted until the user retyped.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      ipc.tabFind(tabId, query, true, true).catch(() => {});
+      if (query.trim() === "") {
+        setMissed(false);
+        silent(ipc.tabFind(tabId, "", true, false));
+        return;
+      }
+      ipc
+        .tabFind(tabId, query, true, true)
+        .then((found) => setMissed(!found))
+        .catch(() => setMissed(false));
     }, 140);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, tabId, pageUrl]);
 
   const close = () => {
-    ipc.tabFind(tabId, "", true, false).catch(() => {}); // clear the highlight
+    silent(ipc.tabFind(tabId, "", true, false)); // clear the highlight
     onClose();
   };
 
@@ -60,6 +91,15 @@ export function FindBar({ tabId, onClose }: { tabId: string; onClose: () => void
         aria-label="Find in page"
         className="w-48 bg-transparent px-1 text-[13px] text-ink-100 outline-none placeholder:text-ink-500"
       />
+      {/* Always mounted so the result is announced when it appears, not just
+          when the region is created. */}
+      <span
+        role="status"
+        aria-live="polite"
+        className="min-w-0 font-mono text-[11px] leading-none text-ink-500"
+      >
+        {missed && !empty ? "No matches" : ""}
+      </span>
       <IconButton label="Previous match" disabled={empty} onClick={() => search(false, false)}>
         <ChevronUp />
       </IconButton>

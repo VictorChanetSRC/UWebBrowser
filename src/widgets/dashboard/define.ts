@@ -97,6 +97,16 @@ export type DashWidgetSpec<W extends DashWidgetBase = DashWidgetBase> = {
   preview: W;
 };
 
+/**
+ * A spec for *some* widget, whose type is no longer known. The registry holds
+ * one list of eleven differently-typed specs, and `create`/`title`/`Body` all
+ * consume `W`, so no honest supertype exists: `DashWidgetSpec<DashWidgetBase>`
+ * would reject every real spec. Each spec is precisely typed at its definition
+ * (`defineDashWidget` below); this is the shelf they sit on afterwards.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyDashWidgetSpec = DashWidgetSpec<any>;
+
 /** Identity helper so a spec infers its widget type from the fields. */
 export const defineDashWidget = <W extends DashWidgetBase>(
   spec: DashWidgetSpec<W>,
