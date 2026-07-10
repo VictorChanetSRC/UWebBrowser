@@ -376,10 +376,15 @@ pub async fn create_tab(
     // and background logic sees this tab. Windows/WebView2 only; a no-op
     // elsewhere. Shares the `browsing` profile with the extension host so the
     // set of extensions is one and the same.
+    //
+    // Deliberately *not* `extensions_path` — extensions belong to the profile,
+    // not the webview, and passing a path makes wry re-run AddBrowserExtension
+    // on this webview. Re-registering an already-loaded extension restarts it
+    // underneath the navigation we're about to start, and the tab's first load
+    // then stalls with its subresources never arriving (so NavigationCompleted
+    // never fires and the tab spins forever). `spawn_host` registers them once,
+    // before any tab exists; every webview on the profile inherits them.
     builder = builder.browser_extensions_enabled(true);
-    if let Some(dir) = crate::extensions::extensions_dir(&app) {
-        builder = builder.extensions_path(dir);
-    }
     // Enable Chromium remote debugging on the browsing-profile browser process
     // so the docked DevTools panel can attach. Must match the identical args on
     // every browsing-profile webview (ext host/popup) or WebView2 rejects the
