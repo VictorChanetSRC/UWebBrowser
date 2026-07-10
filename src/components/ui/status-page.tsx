@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Z_CONTENT } from "@/components/ui/overlay";
 import { cn } from "@/lib/utils";
 
 /** A full-bleed status screen that fills the content area: an optional icon, a
@@ -21,7 +22,8 @@ export function StatusPage({
   return (
     <div
       className={cn(
-        "absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-background p-8 text-center",
+        "absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background p-8 text-center",
+        Z_CONTENT,
         className,
       )}
     >

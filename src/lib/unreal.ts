@@ -1,4 +1,5 @@
 import type { EngineInstall, UProjectInfo } from "./ipc";
+import { uid } from "./list-ops";
 import { loadJson, saveJson } from "./storage";
 
 export type UnrealProject = {
@@ -71,11 +72,6 @@ export function updateUnrealState(
   listeners.forEach((listener) => listener());
 }
 
-/** Back-compat alias — writes go through the shared store now. */
-export function saveUnrealState(next: UnrealState) {
-  updateUnrealState(next);
-}
-
 /** Detected engines plus any manually linked ones not already detected (keyed
  *  by path, case-insensitively). */
 export function mergeEngines(
@@ -93,7 +89,7 @@ export function makeProject(
   gameId = "",
 ): UnrealProject {
   return {
-    id: crypto.randomUUID(),
+    id: uid(),
     name: info.name,
     uprojectPath,
     dir: info.dir,

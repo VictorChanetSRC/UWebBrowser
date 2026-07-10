@@ -17,6 +17,7 @@ import {
   StatGrid,
   TileHint,
   TracksGameConfig,
+  trackedAppId,
   trackedGame,
 } from "./shared";
 
@@ -31,7 +32,7 @@ export type GameWidget = {
 
 function GameBody({ widget, games, active, onOpen, onEditSetup }: DashBodyProps<GameWidget>) {
   const game = trackedGame(widget.gameId, games);
-  const appid = game?.steamAppId?.trim() ?? "";
+  const appid = trackedAppId(widget.gameId, games);
   const { data: stats, error } = usePolled(
     () => ipc.steamStats(appid),
     [appid],

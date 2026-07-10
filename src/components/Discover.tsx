@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { RailButton } from "@/components/ui/rail-button";
 import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/utils";
+import { PageShell } from "@/components/ui/page-shell";
 
 type Props = {
   pinnedUrls: Set<string>;
@@ -59,8 +60,7 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
     setCategory(next !== null && category === next ? null : next);
 
   return (
-    <div className="absolute inset-0 @container overflow-y-auto">
-      <div className="mx-auto flex max-w-[1460px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
+    <PageShell width="max-w-[1460px]">
         <PageHeader
           kicker="Discover"
           title="The Unreal dev toolbox."
@@ -73,7 +73,7 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
             className="hidden @4xl:flex @4xl:sticky @4xl:top-10 flex-col gap-0.5"
             aria-label="Categories"
           >
-            <Label className="px-2.5 pb-2 text-[10.5px]">Browse</Label>
+            <Label size="micro" className="px-2.5 pb-2">Browse</Label>
             <RailButton
               label="All"
               count={total}
@@ -149,8 +149,7 @@ export function Discover({ pinnedUrls, onOpen, onTogglePin }: Props) {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }
 

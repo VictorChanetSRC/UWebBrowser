@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   children: ReactNode;
@@ -34,12 +35,9 @@ export class ErrorBoundary extends Component<Props, State> {
         <p className="text-[13px] text-ink-300">
           Something went wrong rendering this view.
         </p>
-        <button
-          onClick={this.reset}
-          className="rounded-lg border border-ink-800 bg-ink-900 px-3 py-1.5 text-[12.5px] text-ink-200 transition-colors hover:bg-ink-800"
-        >
+        <Button size="sm" onClick={this.reset}>
           Try again
-        </button>
+        </Button>
       </div>
     );
   }

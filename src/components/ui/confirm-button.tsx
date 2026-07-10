@@ -13,16 +13,22 @@ export const ARMED_CLASS =
  * arm (label swaps to `confirmLabel` and the button turns Signal), click again
  * within the window to run `onConfirm`. The label change is announced politely
  * for screen readers.
+ *
+ * `armedClass` overrides the armed treatment for surfaces the default doesn't
+ * suit — a `link`-variant button has no border or fill to tint, so it arms with
+ * colour alone. Without this, those surfaces fork the whole confirm machine.
  */
 export function ConfirmButton({
   onConfirm,
   children,
   confirmLabel = "Click again to confirm",
   className,
+  armedClass = ARMED_CLASS,
   ...props
 }: Omit<ButtonProps, "onClick"> & {
   onConfirm: () => void;
   confirmLabel?: string;
+  armedClass?: string;
 }) {
   const { armed, trigger } = useConfirm(onConfirm);
   return (
@@ -30,7 +36,7 @@ export function ConfirmButton({
       {...props}
       onClick={trigger}
       aria-live="polite"
-      className={cn(armed && ARMED_CLASS, className)}
+      className={cn(armed && armedClass, className)}
     >
       {armed ? confirmLabel : children}
     </Button>

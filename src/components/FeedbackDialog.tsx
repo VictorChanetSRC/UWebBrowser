@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Bug, Lightbulb, X } from "lucide-react";
 import {
   feedbackIssueUrl,
@@ -6,15 +6,26 @@ import {
   type FeedbackKind,
 } from "../lib/github";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { MODAL_SURFACE, SCRIM_CLASS, Z_MODAL } from "@/components/ui/overlay";
+import { useEscape } from "@/hooks/use-escape";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
+import { cn } from "@/lib/utils";
+import { ChipGroup } from "@/components/ui/chip-group";
 
 type Props = {
   onClose: () => void;
   /** Opens the prefilled GitHub issue in a browser tab. */
   onOpen: (url: string) => void;
 };
+
+const KINDS: { key: FeedbackKind; label: string; icon: ReactNode }[] = [
+  { key: "bug", label: "Report a bug", icon: <Bug className="size-3.5" aria-hidden /> },
+  { key: "idea", label: "Share an idea", icon: <Lightbulb className="size-3.5" aria-hidden /> },
+];
 
 /**
  * Collects a bug report or an idea, then hands off to a prefilled GitHub
@@ -29,19 +40,14 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
   const [diagnostics, setDiagnostics] = useState("");
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const titleRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     gatherDiagnostics().then(setDiagnostics).catch(() => {});
-    titleRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useEscape(onClose);
+  useFocusTrap(panelRef, true, titleRef);
 
   const submit = () => {
     onOpen(
@@ -57,16 +63,21 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
+      className={cn("fixed inset-0 flex items-center justify-center", Z_MODAL, SCRIM_CLASS)}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Send feedback"
-        className="w-[520px] max-w-[calc(100%-48px)] animate-rise rounded-2xl border border-border bg-popover p-6 shadow-modal"
+        className={cn(
+          MODAL_SURFACE,
+          // The feedback form is the app's largest dialog; it carries a softer corner.
+          "w-[520px] max-w-[calc(100%-48px)] rounded-2xl p-6",
+        )}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -75,31 +86,12 @@ export function FeedbackDialog({ onClose, onOpen }: Props) {
               Help make UWebBrowser better.
             </h2>
           </div>
-          <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
-            <X className="size-4" aria-hidden />
-          </Button>
+          <IconButton label="Close" onClick={onClose}>
+            <X aria-hidden />
+          </IconButton>
         </div>
 
-        <div className="mt-4 flex gap-2">
-          <Button
-            variant="chip"
-            size="chip"
-            aria-pressed={kind === "bug"}
-            onClick={() => setKind("bug")}
-          >
-            <Bug className="size-3.5" aria-hidden />
-            Report a bug
-          </Button>
-          <Button
-            variant="chip"
-            size="chip"
-            aria-pressed={kind === "idea"}
-            onClick={() => setKind("idea")}
-          >
-            <Lightbulb className="size-3.5" aria-hidden />
-            Share an idea
-          </Button>
-        </div>
+        <ChipGroup className="mt-4" options={KINDS} value={kind} onPick={setKind} />
 
         <div className="mt-4 flex flex-col gap-3">
           <Input

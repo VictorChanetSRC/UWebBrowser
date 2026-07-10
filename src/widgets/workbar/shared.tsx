@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Game } from "@/lib/config";
 import { WidgetHint as SharedWidgetHint, TracksGameChips } from "../shared";
 import type { BarEditorProps, BarWidgetBase } from "./define";
 
@@ -36,6 +37,41 @@ export function WidgetCard({
 /** A quiet one-liner for empty and not-set-up-yet states, at the rail's size. */
 export function WidgetHint({ children }: { children: ReactNode }) {
   return <SharedWidgetHint size="bar">{children}</SharedWidgetHint>;
+}
+
+/**
+ * The gate every Steam rail widget opens with. The dashboard has `DataCard` to
+ * decide loading/error/empty precedence; the rail widgets used to each hand-roll
+ * the same four branches, so the order — and the retry copy — could drift.
+ *
+ * Precedence: no game → no app id → still loading → the source failed → content.
+ */
+export function SteamState<D>({
+  game,
+  appid,
+  data,
+  error,
+  noGame,
+  skeleton,
+  children,
+}: {
+  game: Game | null;
+  appid: string;
+  data: D | null | undefined;
+  error: unknown;
+  /** Why this widget needs a game, in its own words. */
+  noGame: ReactNode;
+  skeleton: ReactNode;
+  /** Rendered only once the data is in, so callers get it non-null. */
+  children: (data: D, game: Game) => ReactNode;
+}) {
+  if (!game) return <WidgetHint>{noGame}</WidgetHint>;
+  if (!appid) {
+    return <WidgetHint>{game.name || "This game"} has no Steam App ID yet.</WidgetHint>;
+  }
+  if (!data && !error) return <>{skeleton}</>;
+  if (!data) return <WidgetHint>Steam didn't answer. Retrying shortly.</WidgetHint>;
+  return <>{children(data, game)}</>;
 }
 
 /** Row editor for widgets that track one setup game via a `gameId` field;

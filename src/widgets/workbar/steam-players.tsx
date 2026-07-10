@@ -8,9 +8,9 @@ import { usePolled } from "@/hooks/use-polled";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Trace } from "@/components/ui/sparkline";
-import { trackedGame, VICTOR_CHANET } from "../types";
+import { trackedAppId, trackedGame, VICTOR_CHANET } from "../types";
 import { defineBarWidget, type BarBodyProps } from "./define";
-import { TracksGameEditor, WidgetCard, WidgetHint } from "./shared";
+import { SteamState, TracksGameEditor, WidgetCard } from "./shared";
 
 /** Live player count with a past-hour trace, remembered across restarts. */
 export type SteamPlayersWidget = {
@@ -28,7 +28,7 @@ const HOUR_MS = 60 * 60_000;
 
 function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamPlayersWidget>) {
   const game = trackedGame(widget.gameId, games);
-  const appid = game?.steamAppId?.trim() ?? "";
+  const appid = trackedAppId(widget.gameId, games);
   // Wrap the count in a fresh object so every poll — even one returning the
   // same number — lands as an update; the blink and the trace key off it.
   const { data, error } = usePolled(
@@ -57,41 +57,42 @@ function SteamPlayersBody({ widget, games, active, onOpen }: BarBodyProps<SteamP
       onClick={appid ? () => onOpen(`https://steamdb.info/app/${appid}/charts/`) : undefined}
       title={appid ? "Open SteamDB charts" : undefined}
     >
-      {!game ? (
-        <WidgetHint>Add your game on the dashboard to track live players.</WidgetHint>
-      ) : !appid ? (
-        <WidgetHint>{game.name || "This game"} has no Steam App ID yet.</WidgetHint>
-      ) : !data && !error ? (
-        <>
-          <Skeleton className="h-7 w-20" />
-          <Skeleton className="h-8 w-full rounded-[4px]" />
-        </>
-      ) : !data ? (
-        <WidgetHint>Steam didn't answer. Retrying shortly.</WidgetHint>
-      ) : (
-        <>
-          <div className="flex flex-col gap-0.5">
-            <span className="flex items-center gap-2 text-[24px] font-semibold leading-none tabular-nums tracking-[-0.02em]">
-              <span
-                className={cn(
-                  "size-2 flex-none rounded-full transition-colors duration-500",
-                  blink ? "bg-signal-500" : "bg-ink-600",
-                )}
-                aria-hidden
-              />
-              {fmtNumber(data.players)}
-            </span>
-            <Label className="text-[10px]">Playing now</Label>
-          </div>
-          <HourTrace samples={samples} now={data.at} />
-          <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-400">
-            <span className="truncate">
-              {game.name || `App ${appid}`}
-            </span>
-            <span className="flex-none">past hour</span>
-          </div>
-        </>
-      )}
+      <SteamState
+        game={game}
+        appid={appid}
+        data={data}
+        error={error}
+        noGame="Add your game on the dashboard to track live players."
+        skeleton={
+          <>
+            <Skeleton className="h-7 w-20" />
+            <Skeleton className="h-8 w-full rounded-[4px]" />
+          </>
+        }
+      >
+        {(live, tracked) => (
+          <>
+            <div className="flex flex-col gap-0.5">
+              <span className="flex items-center gap-2 text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em]">
+                <span
+                  className={cn(
+                    "size-2 flex-none rounded-full transition-colors duration-500",
+                    blink ? "bg-signal-500" : "bg-ink-600",
+                  )}
+                  aria-hidden
+                />
+                {fmtNumber(live.players)}
+              </span>
+              <Label size="micro">Playing now</Label>
+            </div>
+            <HourTrace samples={samples} now={live.at} />
+            <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-400">
+              <span className="truncate">{tracked.name || `App ${appid}`}</span>
+              <span className="flex-none">past hour</span>
+            </div>
+          </>
+        )}
+      </SteamState>
     </WidgetCard>
   );
 }

@@ -8,7 +8,7 @@ import { TracksGameChips } from "../shared";
 import type { DashConfigProps, DashWidgetBase } from "./define";
 
 // Shared helpers re-exported so dashboard widgets keep one local import point.
-export { trackedGame } from "../types";
+export { trackedAppId, trackedGame } from "../types";
 export { RowSkeletons, ChipRow } from "../shared";
 // The dashboard's empty-state one-liner is the roomier "tile" size of WidgetHint.
 export { WidgetHint as TileHint } from "../shared";
@@ -119,7 +119,7 @@ export function Stat({
         {live && <LiveDot className={muted ? "bg-ink-400" : undefined} />}
         {value}
       </span>
-      <Label className="text-[10px]">{label}</Label>
+      <Label size="micro">{label}</Label>
     </div>
   );
 }

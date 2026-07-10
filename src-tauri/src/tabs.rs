@@ -139,6 +139,11 @@ pub(crate) fn route_new_window(
     url: &Url,
     features: &tauri::webview::NewWindowFeatures,
 ) -> NewWindowResponse<tauri::Wry> {
+    eprintln!(
+        "[UWB-PROBE] new-window src={source_id} url={url} size={:?} pos={:?}",
+        features.size(),
+        features.position()
+    );
     match scheme_kind(url) {
         SchemeKind::Web => {
             if matches!(url.scheme(), "http" | "https")
@@ -328,6 +333,7 @@ pub async fn create_tab(
             emit_tab_event(&app_title, &id_title, "title", title);
         })
         .on_navigation(move |url| {
+            eprintln!("[UWB-PROBE] on_navigation tab={id_nav} url={url}");
             // Main-frame only — iframes (ads, sandboxes) fire a different
             // WebView2 event and are unaffected, so legitimate about:blank
             // iframes still load.

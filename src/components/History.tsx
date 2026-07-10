@@ -5,11 +5,12 @@ import { SearchField } from "./SearchField";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Favicon } from "@/components/ui/favicon";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
-import { hostOf } from "@/lib/url";
+import { PageShell } from "@/components/ui/page-shell";
+import { SiteIcon, SiteLabel } from "@/components/ui/site-row";
+import { ChipGroup } from "@/components/ui/chip-group";
 
 type Props = {
   onOpen: (url: string) => void;
@@ -137,8 +138,7 @@ export function History({ onOpen }: Props) {
   };
 
   return (
-    <div className="absolute inset-0 @container overflow-y-auto">
-      <div className="mx-auto flex max-w-[1100px] animate-rise flex-col gap-7 px-10 pb-20 pt-14">
+    <PageShell gap="gap-7">
         <PageHeader
           kicker="History"
           title="Where you’ve been."
@@ -163,23 +163,12 @@ export function History({ onOpen }: Props) {
               Clear all
             </ConfirmButton>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {RANGES.map((r) => (
-              <Button
-                key={r.key}
-                variant="chip"
-                size="chip"
-                aria-pressed={range === r.key}
-                onClick={() => setFilter(r.key)}
-              >
-                {r.label}
-              </Button>
-            ))}
+          <ChipGroup options={RANGES} value={range} onPick={setFilter}>
             <span className="ml-auto text-[12.5px] text-ink-500">
               {filtered.length} {filtered.length === 1 ? "visit" : "visits"}
               {filtered.length !== visits.length && ` of ${visits.length}`}
             </span>
-          </div>
+          </ChipGroup>
         </div>
 
         {groups.length === 0 ? (
@@ -213,19 +202,12 @@ export function History({ onOpen }: Props) {
                         <span className="w-[44px] flex-none font-mono text-[11.5px] text-ink-500">
                           {timeLabel(visit.ts)}
                         </span>
-                        <span className="flex size-5 flex-none items-center justify-center">
-                          <Favicon
-                            url={visit.url}
-                            className="size-3.5 rounded-[3px]"
-                          />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-200">
-                          {visit.title || hostOf(visit.url)}
-                          <span className="font-mono text-[12px] text-ink-500">
-                            {" · "}
-                            {visit.url.replace(/^https?:\/\/(www\.)?/i, "")}
-                          </span>
-                        </span>
+                        <SiteIcon url={visit.url} />
+                        <SiteLabel
+                          title={visit.title}
+                          url={visit.url}
+                          className="text-[12.5px] text-ink-200"
+                        />
                       </button>
                       <button
                         type="button"
@@ -254,7 +236,6 @@ export function History({ onOpen }: Props) {
             )}
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

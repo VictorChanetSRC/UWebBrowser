@@ -4,7 +4,7 @@ import { Copy, Minus, Plus, Puzzle, Square, X } from "lucide-react";
 import type { Tab } from "../App";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { faviconUrl } from "@/lib/url";
+import { Favicon } from "@/components/ui/favicon";
 import { cn } from "@/lib/utils";
 
 /**
@@ -248,7 +248,14 @@ function TitleBarImpl({
               ) : tab.kind === "home" ? (
                 <span className="size-1.5 flex-none rounded-full bg-ink-500" aria-hidden />
               ) : (
-                <TabFavicon url={tab.url} realSrc={tab.favicon} />
+                <Favicon
+                  url={tab.url}
+                  realSrc={tab.favicon}
+                  className="size-3.5 flex-none rounded-[3px]"
+                  fallback={
+                    <span className="size-1.5 flex-none rounded-full bg-ink-500" aria-hidden />
+                  }
+                />
               )}
               <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[12.5px] [mask-image:linear-gradient(to_right,black_calc(100%-12px),transparent)]">
                 {tab.title || "New tab"}
@@ -332,30 +339,3 @@ function TitleBarImpl({
 /** Re-renders only when its props change — App re-renders on every poll tick
  *  and toast, but the tab strip only cares about tabs/activeId. */
 export const TitleBar = memo(TitleBarImpl);
-
-/** A tab's favicon, falling back to the neutral Ink dot when the favicon is
- *  blocked/offline or the URL has no host — no broken-image glyph. Prefers the
- *  page's real favicon (`realSrc`, captured natively) over the lookup service. */
-function TabFavicon({ url, realSrc }: { url: string; realSrc?: string }) {
-  const service = faviconUrl(url);
-  const [realFailed, setRealFailed] = useState(false);
-  const [serviceFailed, setServiceFailed] = useState(false);
-  // Reset when the URL/favicon changes so a reused slot isn't stuck after a 404.
-  useEffect(() => {
-    setRealFailed(false);
-    setServiceFailed(false);
-  }, [realSrc, url]);
-  const usingReal = !!realSrc && !realFailed;
-  const src = usingReal ? realSrc! : serviceFailed ? "" : service;
-  if (!src) {
-    return <span className="size-1.5 flex-none rounded-full bg-ink-500" aria-hidden />;
-  }
-  return (
-    <img
-      className="size-3.5 flex-none rounded-[3px]"
-      src={src}
-      alt=""
-      onError={() => (usingReal ? setRealFailed(true) : setServiceFailed(true))}
-    />
-  );
-}

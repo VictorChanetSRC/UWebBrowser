@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Ban, Download, FileDown, FolderOpen, Trash2, TriangleAlert, X } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import {
@@ -11,8 +11,13 @@ import {
   type DownloadRec,
 } from "../lib/downloads";
 import { fmtBytes, fmtSpeed } from "../lib/format";
+import { Button } from "./ui/button";
+import { DismissLayer } from "./ui/dismiss-layer";
 import { IconButton } from "./ui/icon-button";
+import { POPOVER_SURFACE, Z_POPOVER } from "./ui/overlay";
 import { Spinner } from "./ui/spinner";
+import { useEscape } from "../hooks/use-escape";
+import { useTimedFlag } from "../hooks/use-timed-flag";
 import { cn } from "../lib/utils";
 
 /**
@@ -36,8 +41,7 @@ export function Downloads({
 }) {
   const [items, setItems] = useState<DownloadRec[]>(loadDownloads);
   const [open, setOpen] = useState(false);
-  const [pulse, setPulse] = useState(false);
-  const pulseTimer = useRef<number | undefined>(undefined);
+  const [pulse, firePulse] = useTimedFlag(1200);
 
   // Fold incoming download events into the list. A separate listener from the
   // app's — each `listen` is independent, so this stays fully local.
@@ -46,19 +50,14 @@ export function Downloads({
       if (kind !== "download") return;
       const raw = parseDownloadEvent(value);
       if (!raw) return;
-      if (raw.state === "start") {
-        // Draw the eye to the button without stealing the page (no auto-open).
-        setPulse(true);
-        window.clearTimeout(pulseTimer.current);
-        pulseTimer.current = window.setTimeout(() => setPulse(false), 1200);
-      }
+      // Draw the eye to the button without stealing the page (no auto-open).
+      if (raw.state === "start") firePulse();
       setItems((prev) => applyDownloadEvent(prev, raw, performance.now()));
     });
     return () => {
       unlisten.then((fn) => fn());
-      window.clearTimeout(pulseTimer.current);
     };
-  }, []);
+  }, [firePulse]);
 
   // Persist history (debounced — progress churns fast).
   useEffect(() => {
@@ -73,18 +72,10 @@ export function Downloads({
     if (openSignal > 0) setOpen((o) => !o);
   }, [openSignal]);
 
-  // Close on Escape while open.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  useEscape((e) => {
+    e.preventDefault();
+    setOpen(false);
+  }, open);
 
   const active = useMemo(() => countActive(items), [items]);
   const progress = useMemo(() => activeProgress(items), [items]);
@@ -127,9 +118,13 @@ export function Downloads({
         <>
           {/* Click-away. The active page's webview is hidden while the panel is
               open (see onPanelOpenChange), so this backdrop is reachable. */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
+          <DismissLayer onDismiss={() => setOpen(false)} />
           <div
-            className="absolute right-0 top-[calc(100%+8px)] z-50 w-[360px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-popover"
+            className={cn(
+              "absolute right-0 top-[calc(100%+8px)] w-[360px] overflow-hidden",
+              Z_POPOVER,
+              POPOVER_SURFACE,
+            )}
             role="dialog"
             aria-label="Downloads"
           >
@@ -137,13 +132,14 @@ export function Downloads({
               <span className="text-[12.5px] font-medium text-ink-100">Downloads</span>
               <span className="flex-1" />
               {items.some((d) => d.state !== "active") && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="none"
                   onClick={clearFinished}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
+                  className="rounded px-1.5 py-0.5 text-[11px] font-normal"
                 >
                   Clear finished
-                </button>
+                </Button>
               )}
               <IconButton label="Close" className="size-6" onClick={() => setOpen(false)}>
                 <X className="size-3.5" aria-hidden />
@@ -158,14 +154,15 @@ export function Downloads({
 
             {mostRecent && (
               <div className="border-t border-border px-3.5 py-2">
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="none"
                   onClick={() => ipc.downloadShow(mostRecent.path).catch(() => {})}
-                  className="flex items-center gap-1.5 text-[11.5px] text-ink-400 transition-colors hover:text-ink-100"
+                  className="gap-1.5 rounded px-1.5 py-0.5 text-[11.5px] font-normal"
                 >
                   <FolderOpen className="size-3.5" aria-hidden />
                   Open downloads folder
-                </button>
+                </Button>
               </div>
             )}
           </div>

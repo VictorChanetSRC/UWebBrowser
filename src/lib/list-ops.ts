@@ -9,6 +9,13 @@ export type WithId = { id: string };
  *  work bar mint ids the same way. */
 export const uid = (): string => crypto.randomUUID();
 
+/** The item with `id`, falling back to the first item (so a null/stale id
+ *  follows the primary entry for free), then to null for an empty list. The
+ *  rule every "tracked X" resolver needs — games, projects — in one place. */
+export function pickById<T extends WithId>(items: T[], id: string | null | undefined): T | null {
+  return items.find((item) => item.id === id) ?? items[0] ?? null;
+}
+
 export function removeById<T extends WithId>(items: T[], id: string): T[] {
   return items.filter((item) => item.id !== id);
 }

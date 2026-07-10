@@ -49,6 +49,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RailButton } from "@/components/ui/rail-button";
 import { Tag } from "@/components/ui/tag";
+import { Z_MODAL } from "@/components/ui/overlay";
+import { useEscape } from "@/hooks/use-escape";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
+import { useTimedValue } from "@/hooks/use-timed-flag";
 import { cn } from "@/lib/utils";
 
 /**
@@ -131,8 +135,7 @@ export function WidgetShop<T extends string>({
   const [query, setQuery] = useState("");
   const [view, setView] = useState<ShopView<T>>({ kind: "grid" });
   /** The type whose Add just fired; its button reads "Added" for a beat. */
-  const [justAdded, setJustAdded] = useState<T | null>(null);
-  const addedTimer = useRef<number | undefined>(undefined);
+  const [justAdded, fireJustAdded, clearJustAdded] = useTimedValue<T>();
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -142,67 +145,23 @@ export function WidgetShop<T extends string>({
     setCategory("all");
     setQuery("");
     setView({ kind: "grid" });
-    setJustAdded(null);
-  }, [open]);
+    clearJustAdded();
+  }, [open, clearJustAdded]);
 
-  useEffect(() => () => window.clearTimeout(addedTimer.current), []);
-
-  // Trap focus within the panel while open, and restore it on close.
-  useEffect(() => {
-    if (!open) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const panel = panelRef.current;
-    const focusablesOf = () =>
-      panel
-        ? Array.from(
-            panel.querySelectorAll<HTMLElement>(
-              'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-            ),
-          ).filter((el) => el.offsetParent !== null)
-        : [];
-    if (!panel?.contains(document.activeElement)) searchRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const items = focusablesOf();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey) {
-        if (active === first || !panel?.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !panel?.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("keydown", onKey, true);
-      previouslyFocused?.focus?.();
-    };
-  }, [open]);
+  useFocusTrap(panelRef, open, searchRef);
 
   // Escape peels one layer: author/detail pages walk back out the way they
   // were opened, and only the front of the shop closes it.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      setView((current) => {
-        if (current.kind === "grid") {
-          onClose();
-          return current;
-        }
-        return backOf(current);
-      });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscape((e) => {
+    e.stopPropagation();
+    setView((current) => {
+      if (current.kind === "grid") {
+        onClose();
+        return current;
+      }
+      return backOf(current);
+    });
+  }, open);
 
   const results = useMemo(
     () => filterShop(entries, category, query),
@@ -213,9 +172,7 @@ export function WidgetShop<T extends string>({
 
   const add = (type: T) => {
     onAdd(type);
-    setJustAdded(type);
-    window.clearTimeout(addedTimer.current);
-    addedTimer.current = window.setTimeout(() => setJustAdded(null), 1400);
+    fireJustAdded(type);
   };
 
   const browse = (next: ShopCategoryKey | "all") => {
@@ -244,7 +201,12 @@ export function WidgetShop<T extends string>({
       : undefined;
 
   return (
-    <div className="absolute inset-0 z-40" role="dialog" aria-modal="true" aria-label="Widget shop">
+    <div
+      className={cn("absolute inset-0", Z_MODAL)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Widget shop"
+    >
       <div
         ref={panelRef}
         className="flex h-full animate-rise flex-col overflow-hidden bg-background"
@@ -304,7 +266,7 @@ export function WidgetShop<T extends string>({
               );
             })}
             <div className="mt-auto border-t border-border px-2.5 pb-1 pt-3.5">
-              <Label className="text-[10px]">On your {noun}</Label>
+              <Label size="micro">On your {noun}</Label>
               <p className="mt-1.5 font-mono text-[22px] leading-none tabular-nums text-ink-200">
                 {total}
               </p>
@@ -540,7 +502,7 @@ function ShopCard<T extends string>({
         {preview}
       </PreviewFit>
       <div className="pointer-events-none flex items-center justify-between gap-3 border-t border-border py-2 pl-3.5 pr-2">
-        <span className="min-w-0 truncate font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-600">
+        <Label size="micro" className="min-w-0 truncate text-ink-600">
           {shopCategory(entry.category).label} ·{" "}
           {onAuthor ? (
             <button
@@ -553,7 +515,7 @@ function ShopCard<T extends string>({
           ) : (
             entry.creator.name
           )}
-        </span>
+        </Label>
         <Button
           size="sm"
           className="pointer-events-auto relative flex-none"
@@ -620,7 +582,7 @@ function ShopDetail<T extends string>({
               <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink-100">
                 {entry.name}
               </h2>
-              <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-500">
+              <Label size="micro">
                 {shopCategory(entry.category).label} · by{" "}
                 <button
                   className="underline-offset-2 transition-[color] duration-[130ms] ease-brand hover:text-ink-200 hover:underline"
@@ -629,7 +591,7 @@ function ShopDetail<T extends string>({
                 >
                   {entry.creator.name}
                 </button>
-              </span>
+              </Label>
             </div>
           </div>
 
@@ -642,14 +604,14 @@ function ShopDetail<T extends string>({
                 className="flex items-baseline justify-between gap-6 border-t border-border py-2.5"
               >
                 <dt>
-                  <Label className="text-[10px]">{fact.label}</Label>
+                  <Label size="micro">{fact.label}</Label>
                 </dt>
                 <dd className="text-right text-[12.5px] text-ink-300">{fact.value}</dd>
               </div>
             ))}
             <div className="flex items-baseline justify-between gap-6 border-t border-border py-2.5">
               <dt>
-                <Label className="text-[10px]">Stacking</Label>
+                <Label size="micro">Stacking</Label>
               </dt>
               <dd className="text-right text-[12.5px] text-ink-300">
                 {entry.repeatable ? "Add as many as you like" : `One per ${noun}`}
@@ -733,11 +695,11 @@ function AuthorPage({
           <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink-100">
             {author.name}
           </h2>
-          <p className="mt-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-500">
+          <Label size="micro" className="mt-1 block">
             {widgetCount} {widgetCount === 1 ? "widget" : "widgets"} · {installedCount} on your{" "}
             {noun}
             {elsewhere && ` · ${elsewhere}`}
-          </p>
+          </Label>
         </div>
         {author.url && onOpenUrl && (
           <Button size="sm" className="flex-none" onClick={() => onOpenUrl(author.url!)}>

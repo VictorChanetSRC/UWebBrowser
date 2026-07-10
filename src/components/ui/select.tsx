@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { POPOVER_SURFACE, Z_POPOVER } from "./overlay";
+import { useDismissable } from "../../hooks/use-dismissable";
 import { cn } from "../../lib/utils";
 
 export type SelectOption = { value: string; label: string };
@@ -33,14 +35,10 @@ export function Select({
   const optionId = (index: number) => `${listId}-opt-${index}`;
 
   useEffect(() => {
-    if (!open) return;
-    setActive(selectedIndex);
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown, true);
-    return () => document.removeEventListener("mousedown", onDown, true);
+    if (open) setActive(selectedIndex);
   }, [open, selectedIndex]);
+
+  useDismissable(rootRef, () => setOpen(false), open);
 
   const commit = (index: number) => {
     const option = options[index];
@@ -101,7 +99,12 @@ export function Select({
           id={listId}
           role="listbox"
           aria-label={ariaLabel}
-          className="absolute right-0 top-[calc(100%+4px)] z-50 max-h-56 min-w-full overflow-y-auto rounded-lg border border-ink-700 bg-ink-900 p-1 shadow-popover"
+          className={cn(
+            POPOVER_SURFACE,
+            // A select's list is a tighter surface than a page dropdown.
+            "absolute right-0 top-[calc(100%+4px)] max-h-56 min-w-full overflow-y-auto rounded-lg p-1",
+            Z_POPOVER,
+          )}
         >
           {options.map((option, index) => (
             <li

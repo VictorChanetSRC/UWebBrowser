@@ -56,13 +56,13 @@ export function ChipRow({
 }) {
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5 p-2 pl-2.5", className)}>
-      <Label className="mr-1 text-[10px]">{label}</Label>
+      <Label size="micro" className="mr-1">{label}</Label>
       {options.map((option) => (
         <Button
           key={option.key}
           variant="chip"
           size="chip"
-          className="h-[24px] px-2.5 text-[11px]"
+          className="h-6 px-2.5 text-[11px]"
           aria-pressed={option.key === selected}
           onClick={() => onPick(option.key)}
         >

@@ -7,8 +7,6 @@ import { elapsedSince } from "./format";
 import { ipc, type BuildAction, type BuildRequest, type EngineInstall } from "./ipc";
 import type { UnrealProject } from "./unreal";
 
-export { elapsedSince } from "./format";
-
 /**
  * One build job at a time, held outside React so the log and progress
  * survive tab switches while UAT grinds away for minutes.

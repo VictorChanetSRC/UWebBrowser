@@ -167,7 +167,7 @@ function GameRow({
   return (
     <Card className="gap-3.5 p-4">
       <CardHeader>
-        <Label className="text-[10px]">Game {String(index + 1).padStart(2, "0")}</Label>
+        <Label size="micro">Game {String(index + 1).padStart(2, "0")}</Label>
         {removable && (
           <Button
             variant="ghost"
@@ -198,7 +198,7 @@ function GameRow({
       </div>
 
       <label className="flex max-w-[200px] flex-col gap-2">
-        <Label className="text-[10px]">Steam App ID</Label>
+        <Label size="micro">Steam App ID</Label>
         <Input
           className="font-mono text-[12.5px]"
           value={game.steamAppId}
@@ -225,7 +225,7 @@ function GameRow({
 
       {!check.rows && live.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3.5">
-          <Label className="text-[10px]">Live on</Label>
+          <Label size="micro">Live on</Label>
           {live.map((p) => (
             <Button
               key={p.key}

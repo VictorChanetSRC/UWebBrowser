@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Button } from "./button";
+import { POPOVER_SURFACE, Z_POPOVER } from "./overlay";
 import { PromptIcon, PromptActions } from "./prompt";
+import { cn } from "../../lib/utils";
 
 /** The bottom-right nudge bubble: an icon, a title, a line of body copy, and a
  *  dismiss / primary action pair. Shared by the star nudge and the default-
@@ -23,7 +25,13 @@ export function NudgeCard({
   dismissLabel?: string;
 }) {
   return (
-    <div className="absolute bottom-5 right-3 z-40 w-[360px] animate-rise rounded-xl border border-border bg-popover p-4 shadow-modal">
+    <div
+      className={cn(
+        "absolute bottom-5 right-3 w-[360px] animate-rise p-4",
+        Z_POPOVER,
+        POPOVER_SURFACE,
+      )}
+    >
       <div className="flex items-start gap-3">
         <PromptIcon>{icon}</PromptIcon>
         <div className="min-w-0 flex-1">

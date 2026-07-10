@@ -63,6 +63,13 @@ export function storeExtensionId(url: string): string | null {
   }
 }
 
+/** A URL stripped of its scheme and leading `www.`, the way Chrome shows it in
+ *  the omnibox and history. One regex, so the two lists can't format it
+ *  differently. */
+export function formatBareUrl(url: string): string {
+  return url.replace(/^https?:\/\/(www\.)?/i, "");
+}
+
 /** Google's favicon service for a site, or `""` if the URL has no host.
  *  Callers render a neutral glyph on `onError` — the service can be blocked
  *  offline, and it reveals the host to Google. */

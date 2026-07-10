@@ -3,6 +3,8 @@ import { Plus, Puzzle, Store, Trash2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ipc, type ExtInfo } from "@/lib/ipc";
 import { Button } from "@/components/ui/button";
+import { DismissLayer } from "@/components/ui/dismiss-layer";
+import { POPOVER_SURFACE, Z_POPOVER } from "@/components/ui/overlay";
 import { cn } from "@/lib/utils";
 
 const POPUP_WIDTH = 400;
@@ -161,9 +163,14 @@ export function ExtensionBar({
       {menu && (
         <>
           {/* Click-away layer. */}
-          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <DismissLayer onDismiss={() => setMenu(null)} />
           <div
-            className="fixed z-50 min-w-40 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-popover"
+            className={cn(
+              POPOVER_SURFACE,
+              // A context menu is a tighter surface than a page dropdown.
+              "fixed min-w-40 overflow-hidden rounded-md py-1",
+              Z_POPOVER,
+            )}
             style={{ left: menu.x, top: menu.y }}
           >
             <button

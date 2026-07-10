@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   Bell,
   Camera,
@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusPage } from "@/components/ui/status-page";
 import { PromptIcon, PromptModal, PromptActions } from "@/components/ui/prompt";
+import { POPOVER_SURFACE, Z_POPOVER } from "@/components/ui/overlay";
+import { cn } from "@/lib/utils";
 import { hostOf } from "../lib/url";
 
 /** The permission kinds the backend surfaces (see webext.rs `perm_kind_str`). */
@@ -47,7 +49,13 @@ export function PermissionPrompt({
   };
   const Icon = copy.icon;
   return (
-    <div className="absolute left-4 top-1 z-40 w-[340px] animate-rise rounded-xl border border-border bg-popover p-4 shadow-modal">
+    <div
+      className={cn(
+        "absolute left-4 top-1 w-[340px] animate-rise p-4",
+        Z_POPOVER,
+        POPOVER_SURFACE,
+      )}
+    >
       <div className="flex items-start gap-3">
         <PromptIcon>
           <Icon aria-hidden />
@@ -88,15 +96,13 @@ export function BasicAuthDialog({
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const firstRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    firstRef.current?.focus();
-  }, []);
 
   const submit = () => onSubmit(req.id, username, password);
+  // Escape and scrim clicks abort the load, exactly as Cancel does.
+  const cancel = () => onCancel(req.id);
 
   return (
-    <PromptModal className="w-[380px]" onSubmit={submit}>
+    <PromptModal className="w-[380px]" label="Sign in" onDismiss={cancel} onSubmit={submit}>
       <div className="flex items-start gap-3">
         <PromptIcon>
           <Lock aria-hidden />
@@ -110,7 +116,6 @@ export function BasicAuthDialog({
       </div>
       <div className="mt-4 space-y-2">
         <Input
-          ref={firstRef}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Username"
@@ -125,7 +130,7 @@ export function BasicAuthDialog({
         />
       </div>
       <PromptActions className="mt-4">
-        <Button size="sm" variant="ghost" type="button" onClick={() => onCancel(req.id)}>
+        <Button size="sm" variant="ghost" type="button" onClick={cancel}>
           Cancel
         </Button>
         <Button size="sm" variant="primary" type="submit">
@@ -149,7 +154,11 @@ export function ExternalLinkConfirm({
 }) {
   const scheme = url.split(":")[0];
   return (
-    <PromptModal className="w-[400px]">
+    <PromptModal
+      className="w-[400px]"
+      label={`Open ${scheme} link in another app?`}
+      onDismiss={onCancel}
+    >
       <div className="flex items-start gap-3">
         <PromptIcon>
           <ExternalLink aria-hidden />
@@ -214,18 +223,29 @@ export function CertInterstitial({
 /** Human summary for a WebView2 WebErrorStatus code. Only the codes users
  *  actually hit are named; the rest fall back to a generic line. */
 const ERROR_COPY: Record<number, { title: string; detail: string }> = {
-  // COREWEBVIEW2_WEB_ERROR_STATUS enum ordinals (webview2-com).
-  2: { title: "Can’t reach this site", detail: "The server took too long to respond." },
-  3: { title: "Can’t reach this site", detail: "The connection was reset." },
-  4: { title: "Can’t reach this site", detail: "The connection was interrupted." },
+  // COREWEBVIEW2_WEB_ERROR_STATUS ordinals, per webview2-com-sys bindings.rs.
+  // Cert statuses (1-5) normally surface as a `cert-error` interstitial instead;
+  // they only land here when the navigation failed outright.
+  1: { title: "Your connection isn’t private", detail: "The certificate is for a different site." },
+  2: { title: "Your connection isn’t private", detail: "The site’s certificate has expired." },
+  3: { title: "Your connection isn’t private", detail: "The client certificate has errors." },
+  4: { title: "Your connection isn’t private", detail: "The site’s certificate was revoked." },
+  5: { title: "Your connection isn’t private", detail: "The site’s certificate is invalid." },
   6: {
     title: "This site can’t be reached",
     detail: "The server refused the connection or is unreachable.",
   },
-  7: {
+  7: { title: "This site can’t be reached", detail: "The server took too long to respond." },
+  8: { title: "This site can’t be reached", detail: "The server sent an invalid response." },
+  9: { title: "This site can’t be reached", detail: "The connection was interrupted." },
+  10: { title: "This site can’t be reached", detail: "The connection was reset." },
+  11: { title: "You’re offline", detail: "Check your network connection and try again." },
+  12: { title: "This site can’t be reached", detail: "The connection could not be established." },
+  13: {
     title: "This site can’t be reached",
     detail: "Its server IP address could not be found (DNS).",
   },
+  15: { title: "This site can’t be reached", detail: "The redirect failed." },
 };
 
 /** Branded network-error page shown when a main-frame navigation fails. */

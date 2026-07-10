@@ -1,5 +1,7 @@
 import { PanelBottom, PanelRight, X } from "lucide-react";
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { Z_CONTENT } from "@/components/ui/overlay";
+import { cn } from "@/lib/utils";
 
 /** Thickness (px) of the control strip. Mirrors `DEVTOOLS_STRIP` in tabs.rs —
  *  the backend reserves exactly this band (the native inspector sits past it),
@@ -77,12 +79,12 @@ export function DevtoolsDock({
   const swallow = (e: ReactPointerEvent) => e.stopPropagation();
 
   const btn =
-    "grid size-[22px] place-items-center rounded-md text-ink-400 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-700 hover:text-ink-100";
+    "grid size-[22px] place-items-center rounded-md text-ink-400 transition-[background-color,color] duration-[130ms] ease-brand hover:bg-ink-800 hover:text-ink-100";
 
   return (
     <div
       ref={regionRef}
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-30"
+      className={cn("pointer-events-none absolute inset-x-0 bottom-0", Z_CONTENT)}
       style={{ top: topOffset }}
       aria-hidden={false}
     >

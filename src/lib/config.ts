@@ -1,3 +1,4 @@
+import { uid } from "./list-ops";
 import type { PlatformHit, PlatformKey } from "./platforms";
 import { loadJson, saveJson } from "./storage";
 
@@ -26,7 +27,7 @@ export const emptyConfig: UwbConfig = {
 };
 
 export const newGame = (): Game => ({
-  id: crypto.randomUUID(),
+  id: uid(),
   name: "",
   steamAppId: "",
 });
@@ -53,7 +54,7 @@ export function loadConfig(): UwbConfig {
         parsed.gameName || parsed.steamAppId
           ? [
               {
-                id: crypto.randomUUID(),
+                id: uid(),
                 name: String(parsed.gameName ?? ""),
                 steamAppId: String(parsed.steamAppId ?? ""),
               },

@@ -572,6 +572,12 @@ mod imp {
             }
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
             let _ = args.WebErrorStatus(&mut status);
+            eprintln!(
+                "[UWB-PROBE] nav-completed tab={} status={} source={}",
+                tab_id,
+                status.0,
+                read_pwstr(|p| core_for_source.Source(p))
+            );
             // A navigation we deliberately cancelled (external-protocol handoff,
             // stop button) isn't an error — don't draw an error page for it.
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {

@@ -4,7 +4,9 @@ import type { Game } from "../lib/config";
 import type { Widget } from "../lib/workbar";
 import { BarWidgetBody, barWidgetTitle } from "@/widgets/workbar";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Label, labelVariants } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 type Props = {
   widgets: Widget[];
@@ -36,11 +38,11 @@ function SidebarImpl({
   return (
     <aside className="flex h-full w-full flex-col border-r border-border bg-background">
       <div className="flex items-center justify-between px-[18px] pb-1 pt-3.5">
-        <Label className="text-[10.5px]">Work bar</Label>
+        <Label size="micro">Work bar</Label>
         <Button
           variant="ghost"
           size="none"
-          className="rounded-md px-[7px] py-[3px] font-mono text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-500"
+          className={cn(labelVariants({ size: "micro" }), "rounded-md px-[7px] py-[3px]")}
           onClick={onCustomize}
         >
           Customize
@@ -50,7 +52,7 @@ function SidebarImpl({
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-2.5 pb-4 pt-3">
         {shown.map((widget) => (
           <section key={widget.id} className="flex flex-col gap-1">
-            <Label className="min-w-0 truncate px-2 pb-1 text-[10.5px]">
+            <Label size="micro" className="min-w-0 truncate px-2 pb-1">
               {barWidgetTitle(widget)}
             </Label>
             <BarWidgetBody
@@ -65,14 +67,11 @@ function SidebarImpl({
         ))}
 
         {shown.length === 0 && (
-          <div className="flex flex-col items-start gap-2.5 rounded-[10px] border border-dashed border-ink-700 p-3">
-            <p className="text-[12px] leading-[1.5] text-ink-400">
-              The bar is empty. Add live status and link widgets.
-            </p>
+          <EmptyState variant="compact" title="The bar is empty. Add live status and link widgets.">
             <Button size="sm" onClick={onCustomize}>
               Browse widgets
             </Button>
-          </div>
+          </EmptyState>
         )}
       </div>
 

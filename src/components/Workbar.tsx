@@ -13,9 +13,11 @@ import { BAR_SPECS, BarWidgetEditor, barWidgetTitle } from "@/widgets/workbar";
 import { WorkbarShop } from "./WidgetShop";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Section } from "@/components/ui/section";
+import { PageShell } from "@/components/ui/page-shell";
 
 type Props = {
   widgets: Widget[];
@@ -31,8 +33,7 @@ export function Workbar({ widgets, games, itchApiKey, onChange, onOpen }: Props)
 
   return (
     <>
-      <div className="absolute inset-0 @container overflow-y-auto">
-        <div className="mx-auto flex max-w-[880px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
+      <PageShell width="max-w-[880px]">
           <PageHeader
             kicker="Work bar"
             title="Build your work bar."
@@ -56,13 +57,12 @@ export function Workbar({ widgets, games, itchApiKey, onChange, onOpen }: Props)
 
           <Section label={`On your bar · ${widgets.length}`} className="min-w-0">
             {widgets.length === 0 ? (
-              <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-ink-700 px-6 py-10 text-center text-ink-400">
-                <p>Nothing on the bar. The widget shop has the goods.</p>
+              <EmptyState title="Nothing on the bar. The widget shop has the goods.">
                 <Button onClick={() => setShopOpen(true)}>
                   <Store className="size-3.5" aria-hidden />
                   Browse widgets
                 </Button>
-              </div>
+              </EmptyState>
             ) : (
               <div className="flex flex-col gap-2.5">
                 {widgets.map((widget, index) => (
@@ -81,8 +81,7 @@ export function Workbar({ widgets, games, itchApiKey, onChange, onOpen }: Props)
               </div>
             )}
           </Section>
-        </div>
-      </div>
+      </PageShell>
 
       <WorkbarShop
         open={shopOpen}

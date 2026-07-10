@@ -1,4 +1,5 @@
 import type { Game } from "@/lib/config";
+import { pickById } from "@/lib/list-ops";
 import type { ShopCategoryKey, ShopFact } from "@/lib/widget-shop";
 
 /**
@@ -36,5 +37,12 @@ export type WidgetShopInfo = {
  *  (so a fresh, gameId:null widget follows the primary game for free). Shared
  *  by every game-tracking widget on both surfaces. */
 export function trackedGame(gameId: string | null, games: Game[]): Game | null {
-  return games.find((g) => g.id === gameId) ?? games[0] ?? null;
+  return pickById(games, gameId);
+}
+
+/** The Steam app id of the game a widget tracks, or "" when there isn't one.
+ *  Every Steam widget keys its poll on this, so the trimming and the
+ *  no-app-id sentinel must be decided once. */
+export function trackedAppId(gameId: string | null, games: Game[]): string {
+  return trackedGame(gameId, games)?.steamAppId?.trim() ?? "";
 }

@@ -7,7 +7,7 @@ import { cn } from "../../lib/utils";
  * A site favicon that degrades to a neutral glyph instead of a broken-image
  * icon when the favicon service is blocked or offline (and when the URL has no
  * host). One place for the `onError` fallback the tab strip, work bar, omnibox
- * and password panel all need.
+ * and history all need.
  *
  * Prefers a real favicon URL captured natively from the page (`realSrc`, no
  * third-party lookup); falls back to the favicon service only when the page

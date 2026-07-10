@@ -21,7 +21,9 @@ import { ExtensionBar, WEB_STORE_URL } from "./components/ExtensionBar";
 import { FindBar } from "./components/FindBar";
 import { DevtoolsDock } from "./components/DevtoolsDock";
 import { Button } from "./components/ui/button";
+import { Z_STRIP, Z_TOAST } from "./components/ui/overlay";
 import { StatusPage } from "./components/ui/status-page";
+import { cn } from "./lib/utils";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ExtInfo } from "./lib/ipc";
 import { DefaultBrowserPrompt } from "./components/DefaultBrowserPrompt";
@@ -1296,7 +1298,7 @@ export default function App() {
 
           {/* Find-in-page, in the strip reserved by `findActive` above. */}
           {findActive && (
-            <div className="absolute right-4 top-1 z-40">
+            <div className={cn("absolute right-4 top-1", Z_STRIP)}>
               <FindBar tabId={activeTab.id} onClose={() => setFindOpen(false)} />
             </div>
           )}
@@ -1355,7 +1357,7 @@ export default function App() {
           {/* Always-mounted live region so the toast is announced when it
               appears; the inner node carries the entrance animation. */}
           <div
-            className="pointer-events-none absolute bottom-5 left-1/2 z-50 -translate-x-1/2"
+            className={cn("pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2", Z_TOAST)}
             role="status"
             aria-live="polite"
           >

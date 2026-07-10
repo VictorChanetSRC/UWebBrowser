@@ -12,6 +12,7 @@ import {
   packageProject,
 } from "@/lib/build-job";
 import { elapsedSince } from "@/lib/format";
+import { pickById } from "@/lib/list-ops";
 import { useBuildJob } from "@/hooks/use-build-job";
 import { useEngines } from "@/hooks/use-engines";
 import { useUnrealState } from "@/hooks/use-unreal-state";
@@ -36,7 +37,7 @@ function trackedProject(
   widget: BuildWidget,
   projects: UnrealProject[],
 ): UnrealProject | null {
-  return projects.find((p) => p.id === widget.projectId) ?? projects[0] ?? null;
+  return pickById(projects, widget.projectId);
 }
 
 function BuildBody({ widget, active, onUnreal }: BarBodyProps<BuildWidget>) {

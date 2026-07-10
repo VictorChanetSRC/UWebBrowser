@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { SECTION_HAIRLINE } from "@/components/ui/section";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
+import { PageShell } from "@/components/ui/page-shell";
+import { ChipGroup } from "@/components/ui/chip-group";
 
 type Props = {
   settings: BrowserSettings;
@@ -93,8 +95,8 @@ export function Settings({
   };
 
   return (
-    <div className="absolute inset-0 @container overflow-y-auto">
-      <div className="mx-auto flex max-w-[1100px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
+    <>
+      <PageShell>
         <PageHeader
           kicker="Settings"
           title="Make it yours."
@@ -106,19 +108,12 @@ export function Settings({
             title="Default search engine"
             description="Used when the address bar input isn't a URL."
           >
-            <div className="flex flex-wrap justify-end gap-2">
-              {searchEngines.map((engine) => (
-                <Button
-                  key={engine.key}
-                  variant="chip"
-                  size="chip"
-                  aria-pressed={settings.searchEngine === engine.key}
-                  onClick={() => setEngine(engine.key)}
-                >
-                  {engine.label}
-                </Button>
-              ))}
-            </div>
+            <ChipGroup
+              className="justify-end"
+              options={searchEngines}
+              value={settings.searchEngine}
+              onPick={setEngine}
+            />
           </Row>
         </SettingsSection>
 
@@ -239,12 +234,12 @@ export function Settings({
             Microsoft Edge WebView2.
           </p>
         </SettingsSection>
-      </div>
+      </PageShell>
 
       {feedbackOpen && (
         <FeedbackDialog onClose={() => setFeedbackOpen(false)} onOpen={onOpen} />
       )}
-    </div>
+    </>
   );
 }
 

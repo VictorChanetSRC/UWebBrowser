@@ -33,10 +33,12 @@ import {
   startBuildJob,
   type BuildJob,
 } from "../lib/build-job";
+import { pickById } from "@/lib/list-ops";
 import { useAsync } from "@/hooks/use-async";
 import { useBuildJob } from "@/hooks/use-build-job";
 import { useUnrealState } from "@/hooks/use-unreal-state";
 import { usePolled } from "@/hooks/use-polled";
+import { useTimedFlag } from "@/hooks/use-timed-flag";
 import { elapsedSince, fmtNumber, formatDuration, gb, MISSING } from "@/lib/format";
 import { copyText } from "@/lib/url";
 import { DashSection, Stat, StatGrid } from "./Dashboard";
@@ -51,6 +53,7 @@ import { Select } from "@/components/ui/select";
 import { Tag } from "@/components/ui/tag";
 import { LiveDot } from "@/components/ui/live-dot";
 import { cn } from "@/lib/utils";
+import { PageShell } from "@/components/ui/page-shell";
 
 const ACTIONS: { key: BuildAction; label: string }[] = [
   { key: "build", label: "Build editor" },
@@ -161,8 +164,7 @@ export function UnrealHub({ games }: { games: Game[] }) {
     }));
 
   return (
-    <div className="absolute inset-0 @container overflow-y-auto">
-      <div className="mx-auto flex max-w-[1460px] animate-rise flex-col gap-9 px-10 pb-20 pt-14">
+    <PageShell width="max-w-[1460px]">
         <PageHeader
           kicker="Unreal toolbench"
           title="Build without leaving."
@@ -283,8 +285,7 @@ export function UnrealHub({ games }: { games: Game[] }) {
             <MachineSection />
           </aside>
         </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -303,7 +304,7 @@ function BuildSection({
   const [config, setConfig] = useState("Development");
   const [platform, setPlatform] = useState("Win64");
 
-  const project = projects.find((p) => p.id === projectId) ?? projects[0] ?? null;
+  const project = pickById(projects, projectId);
   const engine = project ? matchEngine(project, engines) : null;
   const running = job !== null && jobRunning(job);
 
@@ -406,7 +407,7 @@ function BuildSection({
           </div>
           {action === "package" && project && (
             <div className="flex items-center gap-2.5">
-              <Label className="w-[72px] flex-none text-[10px]">Output</Label>
+              <Label size="micro" className="w-[72px] flex-none">Output</Label>
               <span className="min-w-0 truncate font-mono text-[11.5px] text-ink-500">
                 {project.archiveDir || `${project.dir}\\Packaged\\${platform}`}
               </span>
@@ -790,7 +791,7 @@ function CardStat({
       >
         {value}
       </span>
-      <Label className="text-[10px]">{label}</Label>
+      <Label size="micro">{label}</Label>
     </div>
   );
 }
@@ -850,7 +851,7 @@ const MAX_ISSUE_ROWS = 250;
 function IssuesPanel({ record, sev }: { record: BuildRecord; sev: 1 | 2 }) {
   const { data: lines, error } = useAsync(() => ipc.buildLog(record.id, true), [record.id]);
   const issues = useMemo(() => (lines ? dedupeIssues(lines, sev) : null), [lines, sev]);
-  const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedAll, fireCopiedAll] = useTimedFlag(1600);
 
   const kind = sev === 2 ? "errors" : "warnings";
   const total = issues?.reduce((sum, issue) => sum + issue.count, 0) ?? 0;
@@ -858,11 +859,7 @@ function IssuesPanel({ record, sev }: { record: BuildRecord; sev: 1 | 2 }) {
 
   const copyAll = async () => {
     if (!issues || issues.length === 0) return;
-    const ok = await copyText(issues.map((issue) => issue.text).join("\n"));
-    if (ok) {
-      setCopiedAll(true);
-      window.setTimeout(() => setCopiedAll(false), 1600);
-    }
+    if (await copyText(issues.map((issue) => issue.text).join("\n"))) fireCopiedAll();
   };
 
   return (
@@ -938,7 +935,7 @@ function IssueRow({ issue }: { issue: Issue }) {
 }
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, fireCopied] = useTimedFlag();
   return (
     <Button
       variant="ghost"
@@ -950,10 +947,7 @@ function CopyButton({ text }: { text: string }) {
       aria-label="Copy line"
       title="Copy line"
       onClick={async () => {
-        if (await copyText(text)) {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1400);
-        }
+        if (await copyText(text)) fireCopied();
       }}
     >
       {copied ? (
@@ -1045,7 +1039,7 @@ function RemoveButton({ label, onClick }: { label: string; onClick: () => void }
 function ChipRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center gap-2.5">
-      <Label className="w-[72px] flex-none text-[10px]">{label}</Label>
+      <Label size="micro" className="w-[72px] flex-none">{label}</Label>
       <div className="flex flex-wrap gap-2">{children}</div>
     </div>
   );

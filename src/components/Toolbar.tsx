@@ -25,15 +25,18 @@ import type { Tab } from "../App";
 import { HOME_URL } from "../App";
 import { suggestFromHistory, type HistoryEntry } from "../lib/history";
 import type { SearchEngine } from "../lib/settings";
-import { Favicon } from "@/components/ui/favicon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import { Downloads } from "@/components/Downloads";
+import { DismissLayer } from "@/components/ui/dismiss-layer";
+import { POPOVER_SURFACE, Z_POPOVER } from "@/components/ui/overlay";
 import { usePolled } from "@/hooks/use-polled";
+import { useTimedFlag } from "@/hooks/use-timed-flag";
 import { fmtNumber } from "@/lib/format";
 import { ipc } from "@/lib/ipc";
-import { copyText, hostOf, storeExtensionId } from "@/lib/url";
+import { copyText, storeExtensionId } from "@/lib/url";
 import { cn } from "@/lib/utils";
+import { SiteIcon, SiteLabel } from "@/components/ui/site-row";
 
 type Props = {
   tab: Tab;
@@ -85,7 +88,7 @@ function ToolbarImpl(props: Props) {
   const [draft, setDraft] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const [copied, fireCopied] = useTimedFlag();
   const [installing, setInstalling] = useState(false);
   const [pageInfo, setPageInfo] = useState(false);
   const storeId = tab.kind === "web" ? storeExtensionId(tab.url) : null;
@@ -165,9 +168,7 @@ function ToolbarImpl(props: Props) {
   };
 
   const copyUrl = async () => {
-    await copyText(tab.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1400);
+    if (await copyText(tab.url)) fireCopied();
   };
 
   // Parsing runs on every render; the 700ms live-URL poll feeds an unchanged
@@ -247,7 +248,7 @@ function ToolbarImpl(props: Props) {
               onClick={() => setPageInfo((v) => !v)}
               aria-label="Connection info"
               aria-expanded={pageInfo}
-              className="flex items-center gap-1.5 rounded text-ink-500 transition-colors hover:text-ink-300"
+              className="flex items-center gap-1.5 rounded text-ink-500 transition-colors duration-[130ms] ease-brand hover:text-ink-300"
             >
               {secure ? (
                 <Lock className="size-3" strokeWidth={1.8} />
@@ -261,15 +262,14 @@ function ToolbarImpl(props: Props) {
             </button>
             {pageInfo && (
               <>
-                {/* Click-away backdrop. */}
-                <button
-                  type="button"
-                  aria-hidden
-                  tabIndex={-1}
-                  className="fixed inset-0 z-40 cursor-default"
-                  onClick={() => setPageInfo(false)}
-                />
-                <div className="absolute left-0 top-7 z-50 w-72 animate-rise rounded-xl border border-ink-700 bg-ink-900 p-3.5 shadow-popover">
+                <DismissLayer onDismiss={() => setPageInfo(false)} />
+                <div
+                  className={cn(
+                    "absolute left-0 top-7 w-72 animate-rise p-3.5",
+                    Z_POPOVER,
+                    POPOVER_SURFACE,
+                  )}
+                >
                   <div className="flex items-center gap-2">
                     {secure ? (
                       <Lock className="size-4 text-ink-300" strokeWidth={1.8} aria-hidden />
@@ -291,7 +291,7 @@ function ToolbarImpl(props: Props) {
                       setPageInfo(false);
                       props.onSettings();
                     }}
-                    className="mt-3 w-full rounded-lg border border-ink-800 px-2.5 py-1.5 text-left text-[12px] text-ink-200 transition-colors hover:bg-ink-800"
+                    className="mt-3 w-full rounded-lg border border-ink-800 px-2.5 py-1.5 text-left text-[12px] text-ink-200 transition-colors duration-[130ms] ease-brand hover:bg-ink-800"
                   >
                     Site & privacy settings
                   </button>
@@ -387,7 +387,11 @@ function ToolbarImpl(props: Props) {
         {open && (
           <div
             id={listId}
-            className="absolute inset-x-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 py-1.5 shadow-popover"
+            className={cn(
+              "absolute inset-x-0 top-[calc(100%+8px)] overflow-hidden py-1.5",
+              Z_POPOVER,
+              POPOVER_SURFACE,
+            )}
             role="listbox"
           >
             {rows.map((row, index) => (
@@ -426,16 +430,8 @@ function ToolbarImpl(props: Props) {
                   </>
                 ) : (
                   <>
-                    <span className="flex size-5 flex-none items-center justify-center">
-                      <Favicon url={row.entry.url} className="size-3.5 rounded-[3px]" />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">
-                      {row.entry.title || hostOf(row.entry.url)}
-                      <span className="font-mono text-[12px] text-ink-500">
-                        {" · "}
-                        {row.entry.url.replace(/^https?:\/\/(www\.)?/i, "")}
-                      </span>
-                    </span>
+                    <SiteIcon url={row.entry.url} />
+                    <SiteLabel title={row.entry.title} url={row.entry.url} />
                   </>
                 )}
               </button>

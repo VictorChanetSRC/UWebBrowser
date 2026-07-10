@@ -33,11 +33,12 @@ import {
 } from "@/widgets/dashboard";
 import { DashboardShop } from "./WidgetShop";
 import { cn } from "@/lib/utils";
-import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Section, SECTION_HAIRLINE } from "@/components/ui/section";
+import { PageShell } from "@/components/ui/page-shell";
 
 // UnrealHub builds its sections and stat tiles from these.
 export { Stat, StatGrid } from "@/widgets/dashboard";
@@ -105,8 +106,6 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
     return () => window.clearTimeout(t);
   }, [widgets]);
   useEffect(() => () => saveDashboard(widgetsRef.current), []);
-
-  const resetLayout = useConfirm(() => setWidgets(seedDashboard(config.games)));
 
   const setup = !config.done || editing;
 
@@ -186,13 +185,7 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
 
   return (
     <>
-      <div className="absolute inset-0 @container overflow-y-auto">
-        <div
-          className={cn(
-            "mx-auto flex animate-rise flex-col gap-9 px-10 pb-20 pt-14",
-            setup ? "max-w-[960px]" : "w-full",
-          )}
-        >
+      <PageShell width={setup ? "max-w-[960px]" : "w-full"}>
           <div className={cn("w-full", !setup && "max-w-[860px] self-center")}>
             <SearchField
               onSubmit={onSearch}
@@ -250,18 +243,16 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
                       Drag tiles to rearrange · drag their edges to resize
                     </span>
                   </div>
-                  <Button
+                  <ConfirmButton
                     variant="link"
                     size="none"
-                    className={cn(
-                      "text-[12px] font-normal",
-                      resetLayout.armed && "text-signal-300 hover:text-signal-200",
-                    )}
-                    onClick={resetLayout.trigger}
-                    aria-live="polite"
+                    className="text-[12px] font-normal"
+                    armedClass="text-signal-300 hover:text-signal-200"
+                    confirmLabel="Click again to reset"
+                    onConfirm={() => setWidgets(seedDashboard(config.games))}
                   >
-                    {resetLayout.armed ? "Click again to reset" : "Reset layout"}
-                  </Button>
+                    Reset layout
+                  </ConfirmButton>
                 </section>
               )}
 
@@ -316,8 +307,7 @@ export function Dashboard({ config, onSave, onOpen, onSearch, onUnreal, focusKey
               )}
             </>
           )}
-        </div>
-      </div>
+      </PageShell>
 
       <DashboardShop
         open={shopOpen}
