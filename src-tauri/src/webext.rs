@@ -283,6 +283,7 @@ mod imp {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Controller,
         ICoreWebView2Deferral, ICoreWebView2DownloadOperation,
+        ICoreWebView2NavigationCompletedEventArgs, ICoreWebView2NavigationCompletedEventArgs2,
         ICoreWebView2PermissionRequestedEventArgs,
         ICoreWebView2ServerCertificateErrorDetectedEventArgs, ICoreWebView2_10, ICoreWebView2_14,
         ICoreWebView2_15, ICoreWebView2_16, ICoreWebView2_3, ICoreWebView2_4,
@@ -297,7 +298,7 @@ mod imp {
         COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER,
         COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW,
         COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL, COREWEBVIEW2_WEB_ERROR_STATUS,
-        COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED,
+        COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED, COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN,
     };
     use webview2_com::{
         AcceleratorKeyPressedEventHandler, BasicAuthenticationRequestedEventHandler,
@@ -694,6 +695,18 @@ mod imp {
         });
     }
 
+    /// The HTTP status the completed navigation was answered with, or 0 when no
+    /// response arrived (a transport-level failure) or the runtime predates the
+    /// `HttpStatusCode` property.
+    unsafe fn http_status(args: &ICoreWebView2NavigationCompletedEventArgs) -> i32 {
+        let Ok(args2) = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>() else {
+            return 0;
+        };
+        let mut code = 0i32;
+        let _ = args2.HttpStatusCode(&mut code);
+        code
+    }
+
     /// Report a failed main-frame navigation (DNS failure, connection refused,
     /// TLS block, timeout…) so the chrome UI can draw a branded error page with
     /// a Reload button, instead of leaving Chromium's raw interstitial showing.
@@ -713,6 +726,16 @@ mod imp {
             // A navigation we deliberately cancelled (external-protocol handoff,
             // stop button) isn't an error — don't draw an error page for it.
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                return Ok(());
+            }
+            // Nor is an HTTP error status. WebView2 clears IsSuccess for every
+            // 4xx/5xx response even though the server sent a page the engine has
+            // already rendered — a site's own 404, a 403 block, an OIDC callback
+            // that answers 500. Those come through as UNKNOWN (no *network* went
+            // wrong) carrying the real status in HttpStatusCode, so that code is
+            // what tells them apart from a transport failure, which has none.
+            // Drawing over them would hide what the site is trying to say.
+            if status == COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN && http_status(&args) != 0 {
                 return Ok(());
             }
             let url = read_pwstr(|p| core_for_source.Source(p));

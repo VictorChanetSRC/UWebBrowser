@@ -258,15 +258,20 @@ type ErrorCopy = {
 
 /** Every WebErrorStatus a main-frame navigation can fail with, named. Status 14
  *  (OPERATION_CANCELED) is filtered out in webext.rs — a stop or an external
- *  protocol handoff isn't a failure. Cert statuses (1-5) normally surface as a
- *  `cert-error` interstitial and only land here when the load failed outright. */
+ *  protocol handoff isn't a failure — as is status 0 on a navigation that did
+ *  get an HTTP response, since a 404/500 page is the site's to render, not ours.
+ *  Cert statuses (1-5) normally surface as a `cert-error` interstitial and only
+ *  land here when the load failed outright. */
 const ERROR_COPY: Record<number, ErrorCopy> = {
+  // The engine's catch-all, and what it reports for a plain refused connection.
+  // By the time this reaches us the navigation got no HTTP response at all —
+  // one that did (a 404, a 500) is left to the site to render, not shown here.
   0: {
     name: "UNKNOWN",
-    title: "The page didn’t load",
-    detail: "The engine stopped the navigation without reporting a reason.",
-    hint: "An extension or a security policy may have blocked it.",
-    icon: CircleAlert,
+    title: "This site can’t be reached",
+    detail: "No response came back from this server.",
+    hint: "It may be offline, or a VPN, firewall or proxy may be blocking it.",
+    icon: ServerOff,
   },
   1: {
     name: "CERTIFICATE_COMMON_NAME_IS_INCORRECT",
