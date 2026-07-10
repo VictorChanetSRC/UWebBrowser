@@ -298,6 +298,7 @@ mod imp {
         COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER,
         COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW,
         COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL, COREWEBVIEW2_WEB_ERROR_STATUS,
+        COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED,
         COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED, COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN,
     };
     use webview2_com::{
@@ -726,6 +727,24 @@ mod imp {
             // A navigation we deliberately cancelled (external-protocol handoff,
             // stop button) isn't an error — don't draw an error page for it.
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                return Ok(());
+            }
+            // CONNECTION_ABORTED is WebView2's status for a navigation that was
+            // aborted rather than failed — the top frame started loading and was
+            // then superseded. The common trigger is a download: clicking a
+            // download link navigates the frame, WebView2 sees the attachment,
+            // aborts the (uncommitted) navigation and hands the bytes to the
+            // downloader — the file arrives fine. A redirect that replaces an
+            // in-flight load, or a page's own window.stop(), land here too. In
+            // every case the last-committed page is still on screen (that's the
+            // URL this event reports), so Chrome shows nothing — matching its
+            // net::ERR_ABORTED, which never gets an error page. We used to paint
+            // "the connection was interrupted" over a download that had actually
+            // succeeded; now we stay out of the way. The rare genuine mid-load
+            // abort (a server dropping the socket) also lands here and simply
+            // leaves the partial page up with the toolbar reload available,
+            // which is the better failure mode than wiping it to an error card.
+            if status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED {
                 return Ok(());
             }
             // Nor is an HTTP error status. WebView2 clears IsSuccess for every
